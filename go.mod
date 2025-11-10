@@ -1,4 +1,4 @@
-module github.com/samuel-pratt/bc-ferries-api
+module github.com/jeffcstock/bc-ferries-api
 
 go 1.23
 

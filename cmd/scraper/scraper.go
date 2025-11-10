@@ -15,9 +15,9 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 
-	"github.com/samuel-pratt/bc-ferries-api/cmd/db"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/models"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/staticdata"
+	"github.com/jeffcstock/bc-ferries-api/cmd/db"
+	"github.com/jeffcstock/bc-ferries-api/cmd/models"
+	"github.com/jeffcstock/bc-ferries-api/cmd/staticdata"
 )
 
 /*
@@ -650,6 +650,13 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             }
         }
 
+        // Extract sailing duration from the 4th column
+        var sailingDuration string
+        if tds.Length() > 3 {
+            durationCell := tds.Eq(3)
+            sailingDuration = clean(durationCell.Text())
+        }
+
         // Filter: drop dangerous goods only sailings outright
         depLower := strings.ToLower(depCell.Text())
         if strings.Contains(depLower, "dangerous goods only") || strings.Contains(depLower, "no passengers permitted") {
@@ -678,8 +685,9 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
         }
 
         s := models.NonCapacitySailing{
-            DepartureTime: depTime,
-            ArrivalTime:   arrTime,
+            DepartureTime:   depTime,
+            ArrivalTime:     arrTime,
+            SailingDuration: sailingDuration,
         }
         if len(statuses) > 0 {
             s.VesselStatus = strings.Join(statuses, " | ")

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/db"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/models"
+	"github.com/jeffcstock/bc-ferries-api/cmd/db"
+	"github.com/jeffcstock/bc-ferries-api/cmd/models"
 )
 
 /**************/

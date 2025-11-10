@@ -5,10 +5,10 @@ import (
 	"net/http"
 
 	_ "github.com/lib/pq"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/config"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/cron"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/db"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/router"
+	"github.com/jeffcstock/bc-ferries-api/cmd/config"
+	"github.com/jeffcstock/bc-ferries-api/cmd/cron"
+	"github.com/jeffcstock/bc-ferries-api/cmd/db"
+	"github.com/jeffcstock/bc-ferries-api/cmd/router"
 )
 
 func main() {

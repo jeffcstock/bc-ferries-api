@@ -10,13 +10,12 @@ Ensure the following are installed on your system:
 2. [Docker Compose](https://docs.docker.com/compose/)
 3. [Go (1.19+)](https://go.dev/dl/) (optional for local development)
 
-
 ## Setup
 
 ### 1. Clone the repository
 
 ```
-git clone https://github.com/samuel-pratt/bc-ferries-api.git
+git clone https://github.com/jeffcstock/bc-ferries-api.git
 cd bc-ferries-api
 ```
 

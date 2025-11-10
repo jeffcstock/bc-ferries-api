@@ -5,7 +5,7 @@ import (
 
 	_ "github.com/lib/pq"
 
-	"github.com/samuel-pratt/bc-ferries-api/cmd/config"
+	"github.com/jeffcstock/bc-ferries-api/cmd/config"
 )
 
 var Conn *sql.DB

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/samuel-pratt/bc-ferries-api/cmd/models"
+	"github.com/jeffcstock/bc-ferries-api/cmd/models"
 )
 
 /*
