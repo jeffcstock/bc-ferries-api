@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron"
-	"github.com/samuel-pratt/bc-ferries-api/cmd/scraper"
+	"github.com/jeffcstock/bc-ferries-api/cmd/scraper"
 )
 
 /*

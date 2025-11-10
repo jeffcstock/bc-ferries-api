@@ -38,10 +38,11 @@ type NonCapacityRoute struct {
 }
 
 type NonCapacitySailing struct {
-	DepartureTime string `json:"time"`
-	ArrivalTime   string `json:"arrivalTime"`
-	VesselName    string `json:"vesselName"`
-	VesselStatus  string `json:"vesselStatus"`
+	DepartureTime   string `json:"time"`
+	ArrivalTime     string `json:"arrivalTime"`
+	SailingDuration string `json:"sailingDuration"`
+	VesselName      string `json:"vesselName"`
+	VesselStatus    string `json:"vesselStatus"`
 }
 
 /**************/
