@@ -657,6 +657,48 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             sailingDuration = clean(durationCell.Text())
         }
 
+        // Extract events from the 5th column (stops, thru fares, transfers)
+        var events []models.SailingEvent
+        if tds.Length() > 4 {
+            eventsCell := tds.Eq(4)
+            eventsCell.Find("p.mb-1").Each(func(_ int, p *goquery.Selection) {
+                // Look for the event type span
+                var eventType string
+                if p.Find(".schedule-leg-type-thru-fare").Length() > 0 {
+                    eventType = "thruFare"
+                } else if p.Find(".schedule-leg-type-stop").Length() > 0 {
+                    eventType = "stop"
+                } else if p.Find(".schedule-leg-type-transfer").Length() > 0 {
+                    eventType = "transfer"
+                }
+
+                // Extract the terminal name (the text after the link/icon)
+                terminalName := ""
+                p.Contents().Each(func(_ int, node *goquery.Selection) {
+                    // Look for <span> elements that are NOT part of the link/icon
+                    if goquery.NodeName(node) == "span" {
+                        // Skip if it's one of the icon/type spans
+                        if node.HasClass("bcf") || node.HasClass("schedule-leg-type-thru-fare") ||
+                           node.HasClass("schedule-leg-type-stop") || node.HasClass("schedule-leg-type-transfer") {
+                            return
+                        }
+                        text := clean(node.Text())
+                        if text != "" {
+                            terminalName = text
+                        }
+                    }
+                })
+
+                // Add the event if we found both type and terminal name
+                if eventType != "" && terminalName != "" {
+                    events = append(events, models.SailingEvent{
+                        Type:         eventType,
+                        TerminalName: terminalName,
+                    })
+                }
+            })
+        }
+
         // Filter: drop dangerous goods only sailings outright
         depLower := strings.ToLower(depCell.Text())
         if strings.Contains(depLower, "dangerous goods only") || strings.Contains(depLower, "no passengers permitted") {
@@ -688,6 +730,7 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             DepartureTime:   depTime,
             ArrivalTime:     arrTime,
             SailingDuration: sailingDuration,
+            Events:          events,
         }
         if len(statuses) > 0 {
             s.VesselStatus = strings.Join(statuses, " | ")

@@ -38,11 +38,17 @@ type NonCapacityRoute struct {
 }
 
 type NonCapacitySailing struct {
-	DepartureTime   string `json:"time"`
-	ArrivalTime     string `json:"arrivalTime"`
-	SailingDuration string `json:"sailingDuration"`
-	VesselName      string `json:"vesselName"`
-	VesselStatus    string `json:"vesselStatus"`
+	DepartureTime   string         `json:"time"`
+	ArrivalTime     string         `json:"arrivalTime"`
+	SailingDuration string         `json:"sailingDuration"`
+	VesselName      string         `json:"vesselName"`
+	VesselStatus    string         `json:"vesselStatus"`
+	Events          []SailingEvent `json:"events,omitempty"`
+}
+
+type SailingEvent struct {
+	Type         string `json:"type"`         // "thruFare", "stop", or "transfer"
+	TerminalName string `json:"terminalName"` // e.g., "Victoria (Swartz Bay)"
 }
 
 /**************/
