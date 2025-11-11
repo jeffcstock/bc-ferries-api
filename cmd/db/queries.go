@@ -33,7 +33,7 @@ func GetCapacitySailings() []models.CapacityRoute {
 		var route models.CapacityRoute
 		var sailings []uint8
 
-		err := rows.Scan(&route.RouteCode, &route.FromTerminalCode, &route.ToTerminalCode, &route.SailingDuration, &sailings)
+		err := rows.Scan(&route.RouteCode, &route.FromTerminalCode, &route.ToTerminalCode, &route.Date, &route.SailingDuration, &sailings)
 		if err != nil {
 			log.Printf("GetCapacitySailings: row scan failed: %v", err)
 			continue
@@ -82,7 +82,7 @@ func GetNonCapacitySailings() []models.NonCapacityRoute {
 		var route models.NonCapacityRoute
 		var sailings []uint8
 
-		err := rows.Scan(&route.RouteCode, &route.FromTerminalCode, &route.ToTerminalCode, &route.SailingDuration, &sailings)
+		err := rows.Scan(&route.RouteCode, &route.FromTerminalCode, &route.ToTerminalCode, &route.Date, &route.SailingDuration, &sailings)
 		if err != nil {
 			log.Printf("GetNonCapacitySailings: row scan failed: %v", err)
 			continue

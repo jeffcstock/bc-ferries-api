@@ -104,7 +104,16 @@ func ScrapeCapacityRoutes() {
  * @return void
  */
 func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, toTerminalCode string) {
+	// Get current date in Pacific Time (BC Ferries operates in PT)
+	loc, err := time.LoadLocation("America/Vancouver")
+	if err != nil {
+		log.Printf("ScrapeCapacityRoute: failed to load PT location: %v", err)
+		loc = time.UTC
+	}
+	currentDate := time.Now().In(loc).Format("2006-01-02")
+
 	route := models.CapacityRoute{
+		Date:             currentDate,
 		RouteCode:        fromTerminalCode + toTerminalCode,
 		ToTerminalCode:   toTerminalCode,
 		FromTerminalCode: fromTerminalCode,
@@ -344,7 +353,12 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
 					}
 				})
 
-				// Add salining to route
+				// Generate unique sailing ID
+				if sailing.DepartureTime != "" {
+					sailing.ID = generateSailingID(route.RouteCode, currentDate, sailing.DepartureTime)
+				}
+
+				// Add sailing to route
 				route.Sailings = append(route.Sailings, sailing)
 			})
 		})
@@ -376,21 +390,23 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
 			route_code,
 			from_terminal_code,
 			to_terminal_code,
+			date,
 			sailing_duration,
 			sailings
 		)
 		VALUES
-			($1, $2, $3, $4, $5) ON CONFLICT (route_code) DO
+			($1, $2, $3, $4, $5, $6) ON CONFLICT (route_code) DO
 		UPDATE
 		SET
 			route_code = EXCLUDED.route_code,
 			from_terminal_code = EXCLUDED.from_terminal_code,
 			to_terminal_code = EXCLUDED.to_terminal_code,
+			date = EXCLUDED.date,
 			sailing_duration = EXCLUDED.sailing_duration,
 			sailings = EXCLUDED.sailings
 		WHERE
 			capacity_routes.route_code = EXCLUDED.route_code`
-	_, err = db.Conn.Exec(sqlStatement, route.RouteCode, route.FromTerminalCode, route.ToTerminalCode, sailingDuration, sailingsJson)
+	_, err = db.Conn.Exec(sqlStatement, route.RouteCode, route.FromTerminalCode, route.ToTerminalCode, currentDate, sailingDuration, sailingsJson)
 	if err != nil {
 		log.Printf("ScrapeCapacityRoute: failed to insert route %s: %v", route.RouteCode, err)
 		return
@@ -458,9 +474,12 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 		}
 		return s
 	}
-	todayNorm := normalizeDay(time.Now().In(loc).Weekday().String()) // e.g. "MONDAY"
+	today := time.Now().In(loc)
+	todayNorm := normalizeDay(today.Weekday().String()) // e.g. "MONDAY"
+	currentDate := today.Format("2006-01-02")
 
 	route := models.NonCapacityRoute{
+		Date:             currentDate,
 		RouteCode:        fromTerminalCode + toTerminalCode,
 		FromTerminalCode: fromTerminalCode,
 		ToTerminalCode:   toTerminalCode,
@@ -708,7 +727,6 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
         // Apply exception rules: "Only on <dates>" and "Except on <dates>"
         // Build a combined note string from red notes
         combinedRed := strings.ToLower(strings.Join(redNotes, "; "))
-        today := time.Now().In(loc)
         todayKey := fmt.Sprintf("%02d-%02d", int(today.Month()), today.Day())
 
         // If there is an "only on" note, include only if today is listed
@@ -736,6 +754,11 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             s.VesselStatus = strings.Join(statuses, " | ")
         }
 
+        // Generate unique sailing ID
+        if s.DepartureTime != "" {
+            s.ID = generateSailingID(route.RouteCode, currentDate, s.DepartureTime)
+        }
+
         if s.DepartureTime != "" || s.ArrivalTime != "" {
             route.Sailings = append(route.Sailings, s)
         }
@@ -758,21 +781,23 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 
 	sqlStatement := `
 		INSERT INTO non_capacity_routes (
-			route_code, 
-			from_terminal_code, 
-			to_terminal_code, 
+			route_code,
+			from_terminal_code,
+			to_terminal_code,
+			date,
 			sailing_duration,
 			sailings
-		) 
-		VALUES ($1, $2, $3, $4, $5)
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (route_code) DO UPDATE SET
-			from_terminal_code = EXCLUDED.from_terminal_code, 
+			from_terminal_code = EXCLUDED.from_terminal_code,
 			to_terminal_code = EXCLUDED.to_terminal_code,
+			date = EXCLUDED.date,
 			sailing_duration = EXCLUDED.sailing_duration,
-			sailings = EXCLUDED.sailings 
+			sailings = EXCLUDED.sailings
 	`
 	_, err = db.Conn.Exec(sqlStatement,
-		route.RouteCode, route.FromTerminalCode, route.ToTerminalCode, sailingDuration, sailingsJSON,
+		route.RouteCode, route.FromTerminalCode, route.ToTerminalCode, currentDate, sailingDuration, sailingsJSON,
 	)
 	if err != nil {
 		log.Printf("ScrapeNonCapacityRoute: DB insert/update failed for %s: %v", route.RouteCode, err)
@@ -805,4 +830,74 @@ func fetchWithChromedp(ctx context.Context, url string) (string, error) {
 	)
 
 	return html, err
+}
+
+/*
+ * convertTo24HourFormat
+ *
+ * Converts a 12-hour time format string to 24-hour format without colons.
+ * Handles edge cases like "(Tomorrow)" suffix and various spacing.
+ *
+ * Examples:
+ *   "7:00 am" → "0700"
+ *   "3:15 pm" → "1515"
+ *   "11:30 pm" → "2330"
+ *   "7:00 am (Tomorrow)" → "0700"
+ *
+ * @param string time12h - The 12-hour format time string
+ *
+ * @return string - The 24-hour format time without colons (e.g., "0700", "1515")
+ */
+func convertTo24HourFormat(time12h string) string {
+	// Remove "(Tomorrow)" suffix if present
+	time12h = strings.ReplaceAll(time12h, "(Tomorrow)", "")
+	time12h = strings.TrimSpace(time12h)
+
+	// Parse the time using Go's time package
+	// Expected formats: "3:04 pm", "3:04 PM", "03:04 pm", etc.
+	layouts := []string{
+		"3:04 pm",
+		"3:04 PM",
+		"03:04 pm",
+		"03:04 PM",
+		"3:04pm",
+		"3:04PM",
+	}
+
+	var parsedTime time.Time
+	var err error
+	for _, layout := range layouts {
+		parsedTime, err = time.Parse(layout, time12h)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		log.Printf("convertTo24HourFormat: failed to parse time '%s': %v", time12h, err)
+		return "0000"
+	}
+
+	// Format as 24-hour time without colons
+	return parsedTime.Format("1504")
+}
+
+/*
+ * generateSailingID
+ *
+ * Generates a unique sailing ID in the format: {routeCode}-{date}-{time24h}
+ *
+ * Examples:
+ *   "TSAPOB", "2025-11-11", "7:00 am" → "TSAPOB-2025-11-11-0700"
+ *   "HSBNÄN", "2025-11-11", "3:15 pm" → "HSBNÄN-2025-11-11-1515"
+ *
+ * @param string routeCode - The route code (e.g., "TSAPOB")
+ * @param string date - ISO date string (e.g., "2025-11-11")
+ * @param string departureTime - 12-hour format time (e.g., "7:00 am")
+ *
+ * @return string - Unique sailing ID
+ */
+func generateSailingID(routeCode, date, departureTime string) string {
+	time24h := convertTo24HourFormat(departureTime)
+	return fmt.Sprintf("%s-%s-%s", routeCode, date, time24h)
 }

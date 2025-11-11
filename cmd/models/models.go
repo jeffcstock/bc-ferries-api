@@ -7,6 +7,7 @@ package models
 /**************/
 
 type CapacityRoute struct {
+	Date             string            `json:"date"`
 	RouteCode        string            `json:"routeCode"`
 	FromTerminalCode string            `json:"fromTerminalCode"`
 	ToTerminalCode   string            `json:"toTerminalCode"`
@@ -15,6 +16,7 @@ type CapacityRoute struct {
 }
 
 type CapacitySailing struct {
+	ID            string `json:"id"`
 	DepartureTime string `json:"time"`
 	ArrivalTime   string `json:"arrivalTime"`
 	SailingStatus string `json:"sailingStatus"`
@@ -30,6 +32,7 @@ type NonCapacityResponse struct {
 }
 
 type NonCapacityRoute struct {
+	Date             string               `json:"date"`
 	RouteCode        string               `json:"routeCode"`
 	FromTerminalCode string               `json:"fromTerminalCode"`
 	ToTerminalCode   string               `json:"toTerminalCode"`
@@ -38,6 +41,7 @@ type NonCapacityRoute struct {
 }
 
 type NonCapacitySailing struct {
+	ID              string         `json:"id"`
 	DepartureTime   string         `json:"time"`
 	ArrivalTime     string         `json:"arrivalTime"`
 	SailingDuration string         `json:"sailingDuration"`
