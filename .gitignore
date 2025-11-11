@@ -4,6 +4,10 @@
 # Environment variables
 .env
 
+# SSH keys (should never be in repo)
+*.key
+*.pem
+
 # Build
 bc-ferries-api
 app

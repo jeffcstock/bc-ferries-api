@@ -1,6 +1,14 @@
-# BC Ferries API - [bcferriesapi.ca](https://bcferriesapi.ca)
+# BC Ferries API
 
 The BC Ferries API provides current data on BC Ferries sailings and schedules for all routes.
+
+## Current Deployment
+
+**Self-hosted instance:** `http://192.18.154.57`
+
+This is a personal instance hosted on Oracle Cloud Always Free tier. See [HOSTING.md](HOSTING.md) for deployment details.
+
+**Note:** The public instance at `bcferriesapi.ca` is maintained separately.
 
 ## Prerequisites
 
