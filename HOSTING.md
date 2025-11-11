@@ -175,12 +175,15 @@ ssh bc-ferries-api
 # Navigate to project
 cd ~/bc-ferries-api
 
-# Pull latest code
-git pull
+# use deploy script
+./deploy.sh
 
-# Rebuild and restart containers
-docker compose down
-docker compose up -d --build
+That's it! The script will:
+  - Pull latest from master
+  - Stop containers
+  - Rebuild and restart them
+  - Show container status
+  - Stream API logs (Ctrl+C to exit)
 
 # Check logs for errors
 docker compose logs -f api
