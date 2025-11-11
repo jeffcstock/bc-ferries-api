@@ -106,12 +106,20 @@ func GetNonCapacitySailings(w http.ResponseWriter, r *http.Request, ps httproute
 		Routes: routes,
 	}
 
-	jsonString, _ := json.Marshal(response)
+	// Check if we have any routes with sailings data
+	if len(response.Routes) == 0 || (len(response.Routes) > 0 && len(response.Routes[0].Sailings) == 0) {
+		jsonString, _ := json.Marshal("BC Ferries Data Currently Down")
 
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonString)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jsonString)
+	} else {
+		jsonString, _ := json.Marshal(response)
 
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jsonString)
+	}
 }
 
 /**************/
