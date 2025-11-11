@@ -89,6 +89,43 @@ func GetCapacitySailings(w http.ResponseWriter, r *http.Request, ps httprouter.P
 }
 
 /*
+ * GetSingleCapacityRoute
+ *
+ * Returns sailing data for a specific capacity route by route code
+ *
+ * @param http.ResponseWriter w
+ * @param *http.Request r
+ * @param httprouter.Params ps
+ *
+ * @return void
+ */
+func GetSingleCapacityRoute(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	routeCode := ps.ByName("routeCode")
+	routes := db.GetCapacitySailings()
+
+	// Find the route matching the route code
+	var foundRoute *models.CapacityRoute
+	for _, route := range routes {
+		if route.RouteCode == routeCode {
+			foundRoute = &route
+			break
+		}
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	if foundRoute != nil {
+		jsonString, _ := json.Marshal(foundRoute)
+		w.Write(jsonString)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+		jsonString, _ := json.Marshal(map[string]string{"error": "Route not found"})
+		w.Write(jsonString)
+	}
+}
+
+/*
  * GetNonCapacitySailings
  *
  * Returns sailing data for all non capacity routes
@@ -112,6 +149,43 @@ func GetNonCapacitySailings(w http.ResponseWriter, r *http.Request, ps httproute
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(jsonString)
 
+}
+
+/*
+ * GetSingleNonCapacityRoute
+ *
+ * Returns sailing data for a specific non-capacity route by route code
+ *
+ * @param http.ResponseWriter w
+ * @param *http.Request r
+ * @param httprouter.Params ps
+ *
+ * @return void
+ */
+func GetSingleNonCapacityRoute(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	routeCode := ps.ByName("routeCode")
+	routes := db.GetNonCapacitySailings()
+
+	// Find the route matching the route code
+	var foundRoute *models.NonCapacityRoute
+	for _, route := range routes {
+		if route.RouteCode == routeCode {
+			foundRoute = &route
+			break
+		}
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	if foundRoute != nil {
+		jsonString, _ := json.Marshal(foundRoute)
+		w.Write(jsonString)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+		jsonString, _ := json.Marshal(map[string]string{"error": "Route not found"})
+		w.Write(jsonString)
+	}
 }
 
 /**************/
