@@ -1,6 +1,87 @@
 package staticdata
 
 /*
+ * Terminal
+ *
+ * Represents a ferry terminal with its identifying information and geographic coordinates
+ */
+type Terminal struct {
+	Code        string
+	Name        string
+	ServiceArea string
+	Lat         float64
+	Lon         float64
+}
+
+/*
+ * GetTerminals
+ *
+ * Returns a map of terminal codes to their detailed information
+ *
+ * @return map[string]Terminal
+ */
+func GetTerminals() map[string]Terminal {
+	return map[string]Terminal{
+		"TSA": {
+			Code:        "TSA",
+			Name:        "Tsawwassen",
+			ServiceArea: "Vancouver",
+			Lat:         49.00668815099993,
+			Lon:         -123.131201540845922,
+		},
+		"POB": {
+			Code:        "POB",
+			Name:        "Otter Bay",
+			ServiceArea: "Pender Island",
+			Lat:         48.80057460745268,
+			Lon:         -123.3156620925309,
+		},
+		"SWB": {
+			Code:        "SWB",
+			Name:        "Swartz Bay",
+			ServiceArea: "Victoria",
+			Lat:         48.689514131680525,
+			Lon:         -123.41159059969662,
+		},
+		"PLH": {
+			Code:        "PLH",
+			Name:        "Long Harbour",
+			ServiceArea: "Salt Spring Island",
+			Lat:         48.85202048619191,
+			Lon:         -123.44573195530967,
+		},
+		"PVB": {
+			Code:        "PVB",
+			Name:        "Village Bay",
+			ServiceArea: "Mayne Island",
+			Lat:         48.84469158068223,
+			Lon:         -123.32457711184203,
+		},
+		"PST": {
+			Code:        "PST",
+			Name:        "Lyall Harbour",
+			ServiceArea: "Saturna Island",
+			Lat:         48.7980858638295,
+			Lon:         -123.20133068520887,
+		},
+		"FUL": {
+			Code:        "FUL",
+			Name:        "Fulford Harbour",
+			ServiceArea: "Salt Spring Island",
+			Lat:         48.7693511284093,
+			Lon:         -123.45103007478454,
+		},
+		"PSB": {
+			Code:        "PSB",
+			Name:        "Sturdies Bay",
+			ServiceArea: "Galiano Island",
+			Lat:         48.876705467392696,
+			Lon:         -123.31512438289518,
+		},
+	}
+}
+
+/*
  * GetCapacityDepartureTerminals
  *
  * Returns an array of departure terminals for capacity routes
