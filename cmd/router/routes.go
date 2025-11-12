@@ -3,6 +3,7 @@ package router
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -186,6 +187,88 @@ func GetSingleNonCapacityRoute(w http.ResponseWriter, r *http.Request, ps httpro
 		jsonString, _ := json.Marshal(map[string]string{"error": "Route not found"})
 		w.Write(jsonString)
 	}
+}
+
+/*
+ * GetCapacityRoutesList
+ *
+ * Returns lightweight metadata for capacity routes (without sailings).
+ * Optionally filters by route codes via query parameter.
+ *
+ * Query params:
+ *   - routeCodes: comma-separated route codes (e.g., "TSASWB,SWBTSA")
+ *
+ * @param http.ResponseWriter w
+ * @param *http.Request r
+ * @param httprouter.Params ps
+ *
+ * @return void
+ */
+func GetCapacityRoutesList(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Parse query parameter
+	routeCodesParam := r.URL.Query().Get("routeCodes")
+	var routeCodes []string
+
+	if routeCodesParam != "" {
+		routeCodes = strings.Split(routeCodesParam, ",")
+		// Trim whitespace from each code
+		for i := range routeCodes {
+			routeCodes[i] = strings.TrimSpace(routeCodes[i])
+		}
+	}
+
+	routes := db.GetCapacityRoutesInfo(routeCodes)
+
+	response := models.CapacityRoutesResponse{
+		Routes: routes,
+	}
+
+	jsonString, _ := json.Marshal(response)
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonString)
+}
+
+/*
+ * GetNonCapacityRoutesList
+ *
+ * Returns lightweight metadata for non-capacity routes (without sailings).
+ * Optionally filters by route codes via query parameter.
+ *
+ * Query params:
+ *   - routeCodes: comma-separated route codes (e.g., "FULSWB,BOWHSB")
+ *
+ * @param http.ResponseWriter w
+ * @param *http.Request r
+ * @param httprouter.Params ps
+ *
+ * @return void
+ */
+func GetNonCapacityRoutesList(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Parse query parameter
+	routeCodesParam := r.URL.Query().Get("routeCodes")
+	var routeCodes []string
+
+	if routeCodesParam != "" {
+		routeCodes = strings.Split(routeCodesParam, ",")
+		// Trim whitespace from each code
+		for i := range routeCodes {
+			routeCodes[i] = strings.TrimSpace(routeCodes[i])
+		}
+	}
+
+	routes := db.GetNonCapacityRoutesInfo(routeCodes)
+
+	response := models.NonCapacityRoutesResponse{
+		Routes: routes,
+	}
+
+	jsonString, _ := json.Marshal(response)
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonString)
 }
 
 /**************/

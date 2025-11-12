@@ -20,10 +20,20 @@ func SetupRouter() *httprouter.Router {
 	// V2 Routes (with and without trailing slash)
 	router.GET("/v2", GetCapacityAndNonCapacitySailings)
 	router.GET("/v2/", GetCapacityAndNonCapacitySailings)
+
+	// Routes list endpoints (moved to avoid conflict with :routeCode wildcard)
+	router.GET("/v2/routes/capacity", GetCapacityRoutesList)
+	router.GET("/v2/routes/capacity/", GetCapacityRoutesList)
+	router.GET("/v2/routes/noncapacity", GetNonCapacityRoutesList)
+	router.GET("/v2/routes/noncapacity/", GetNonCapacityRoutesList)
+
+	// Capacity routes
 	router.GET("/v2/capacity", GetCapacitySailings)
 	router.GET("/v2/capacity/", GetCapacitySailings)
 	router.GET("/v2/capacity/:routeCode", GetSingleCapacityRoute)
 	router.GET("/v2/capacity/:routeCode/", GetSingleCapacityRoute)
+
+	// Non-capacity routes
 	router.GET("/v2/noncapacity", GetNonCapacitySailings)
 	router.GET("/v2/noncapacity/", GetNonCapacitySailings)
 	router.GET("/v2/noncapacity/:routeCode", GetSingleNonCapacityRoute)

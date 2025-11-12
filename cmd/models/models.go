@@ -15,6 +15,14 @@ type CapacityRoute struct {
 	Sailings         []CapacitySailing `json:"sailings"`
 }
 
+type CapacityRouteInfo struct {
+	Date             string `json:"date"`
+	RouteCode        string `json:"routeCode"`
+	FromTerminalCode string `json:"fromTerminalCode"`
+	ToTerminalCode   string `json:"toTerminalCode"`
+	SailingDuration  string `json:"sailingDuration"`
+}
+
 type CapacitySailing struct {
 	ID            string `json:"id"`
 	DepartureTime string `json:"time"`
@@ -31,6 +39,14 @@ type NonCapacityResponse struct {
 	Routes []NonCapacityRoute `json:"routes"`
 }
 
+type CapacityRoutesResponse struct {
+	Routes []CapacityRouteInfo `json:"routes"`
+}
+
+type NonCapacityRoutesResponse struct {
+	Routes []NonCapacityRouteInfo `json:"routes"`
+}
+
 type NonCapacityRoute struct {
 	Date             string               `json:"date"`
 	RouteCode        string               `json:"routeCode"`
@@ -38,6 +54,14 @@ type NonCapacityRoute struct {
 	ToTerminalCode   string               `json:"toTerminalCode"`
 	SailingDuration  string               `json:"sailingDuration"`
 	Sailings         []NonCapacitySailing `json:"sailings"`
+}
+
+type NonCapacityRouteInfo struct {
+	Date             string `json:"date"`
+	RouteCode        string `json:"routeCode"`
+	FromTerminalCode string `json:"fromTerminalCode"`
+	ToTerminalCode   string `json:"toTerminalCode"`
+	SailingDuration  string `json:"sailingDuration"`
 }
 
 type NonCapacitySailing struct {
