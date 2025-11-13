@@ -76,8 +76,6 @@ type NonCapacitySailing struct {
 	DepartureTime      string         `json:"time"`
 	ArrivalTime        string         `json:"arrivalTime"`
 	SailingDuration    string         `json:"sailingDuration"`
-	VesselName         string         `json:"vesselName"`
-	VesselStatus       string         `json:"vesselStatus"`
 	Events             []SailingEvent `json:"events,omitempty"`
 	Legs               []Leg          `json:"legs,omitempty"`
 	TotalTravelMin     int            `json:"total_travel_min"`              // Sum of leg sailing durations

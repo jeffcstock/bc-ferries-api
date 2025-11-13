@@ -481,8 +481,8 @@ func ConvertV1ResponseToV2Response(allData AllDataResponse) map[string]map[strin
 						Fill:          0,
 						CarFill:       0,
 						OversizeFill:  0,
-						VesselName:    nonCapSailing.VesselName,
-						VesselStatus:  nonCapSailing.VesselStatus,
+						VesselName:    "",
+						VesselStatus:  "",
 					})
 				}
 

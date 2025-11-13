@@ -865,9 +865,6 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             Events:          events,
             Legs:            legs,
         }
-        if len(statuses) > 0 {
-            s.VesselStatus = strings.Join(statuses, " | ")
-        }
 
         // Generate unique sailing ID
         if s.DepartureTime != "" {
