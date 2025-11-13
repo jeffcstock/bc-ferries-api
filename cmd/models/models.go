@@ -1,6 +1,11 @@
 package models
 
-import "github.com/jeffcstock/bc-ferries-api/cmd/staticdata"
+import (
+	"strings"
+	"time"
+
+	"github.com/jeffcstock/bc-ferries-api/cmd/staticdata"
+)
 
 // For shared structs
 
@@ -93,19 +98,23 @@ type Leg struct {
 	EventType           *string              `json:"event_type"`      // null for final leg, populated for intermediate legs
 	DistanceKm          *float64             `json:"distance_km"`     // null if not available
 	AvgDurationMin      *int                 `json:"avg_duration_min"` // null if not available
+	VesselName          *string              `json:"vessel_name"`      // null if not available, "UNKNOWN" if lookup failed
 }
 
 /*
  * BuildLegs
  *
- * Constructs sailing legs from route code and events
+ * Constructs sailing legs from route code and events, including vessel name lookups
  * Route code format: OODDDD (first 3 chars = origin, last 3 = destination)
  *
  * @param routeCode string - e.g., "TSAPOB"
  * @param events []SailingEvent - stops, transfers, thru fares
+ * @param sailingDepartureTime string - Departure time of the sailing (e.g., "7:10 am")
+ * @param vesselDatabase map[string]map[string]string - Vessel database (terminal → time → vessel)
+ * @param avgDwellMin int - Average dwell time per stop in minutes
  * @return []Leg - array of leg segments
  */
-func BuildLegs(routeCode string, events []SailingEvent) []Leg {
+func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime string, vesselDatabase map[string]map[string]string, avgDwellMin int) []Leg {
 	terminals := staticdata.GetTerminals()
 
 	// Extract origin and destination codes from route code
@@ -138,12 +147,18 @@ func BuildLegs(routeCode string, events []SailingEvent) []Leg {
 			leg.AvgDurationMin = &legInfo.AvgDurationMin
 		}
 
+		// Lookup vessel for first leg
+		if terminalDB, ok := vesselDatabase[originTerminal.Code]; ok {
+			leg.VesselName = findVesselByTimeWindow(terminalDB, sailingDepartureTime, 60)
+		}
+
 		legs = append(legs, leg)
 		return legs
 	}
 
 	// Build legs from events
 	currentOrigin := originTerminal
+	elapsedMinutes := 0 // Track cumulative time for subsequent leg lookups
 
 	for _, event := range events {
 		// Map event terminal name to code
@@ -188,6 +203,32 @@ func BuildLegs(routeCode string, events []SailingEvent) []Leg {
 			leg.AvgDurationMin = &legInfo.AvgDurationMin
 		}
 
+		// Lookup vessel name
+		if len(legs) == 0 {
+			// First leg: use sailing departure time
+			if terminalDB, ok := vesselDatabase[currentOrigin.Code]; ok {
+				leg.VesselName = findVesselByTimeWindow(terminalDB, sailingDepartureTime, 60)
+			}
+		} else {
+			// Subsequent legs: check previous event type
+			prevEvent := events[len(legs)-1]
+			if prevEvent.Type == "stop" {
+				// Same vessel continues
+				leg.VesselName = legs[len(legs)-1].VesselName
+			} else if prevEvent.Type == "transfer" || prevEvent.Type == "thruFare" {
+				// Different vessel: calculate estimated departure time and lookup
+				estimatedTime := calculateEstimatedTime(sailingDepartureTime, elapsedMinutes+avgDwellMin)
+				if terminalDB, ok := vesselDatabase[currentOrigin.Code]; ok {
+					leg.VesselName = findVesselByTimeWindow(terminalDB, estimatedTime, 60)
+				}
+			}
+		}
+
+		// Update elapsed time for next leg
+		if leg.AvgDurationMin != nil {
+			elapsedMinutes += *leg.AvgDurationMin
+		}
+
 		legs = append(legs, leg)
 		currentOrigin = eventTerminal
 	}
@@ -206,8 +247,65 @@ func BuildLegs(routeCode string, events []SailingEvent) []Leg {
 		finalLeg.AvgDurationMin = &legInfo.AvgDurationMin
 	}
 
+	// Lookup vessel for final leg
+	if len(events) > 0 {
+		lastEvent := events[len(events)-1]
+		if lastEvent.Type == "stop" {
+			// Same vessel continues
+			finalLeg.VesselName = legs[len(legs)-1].VesselName
+		} else if lastEvent.Type == "transfer" || lastEvent.Type == "thruFare" {
+			// Different vessel: calculate estimated departure time and lookup
+			estimatedTime := calculateEstimatedTime(sailingDepartureTime, elapsedMinutes+avgDwellMin)
+			if terminalDB, ok := vesselDatabase[currentOrigin.Code]; ok {
+				finalLeg.VesselName = findVesselByTimeWindow(terminalDB, estimatedTime, 60)
+			}
+		}
+	}
+
 	legs = append(legs, finalLeg)
 	return legs
+}
+
+/*
+ * Helper function to find vessel by time window (internal version for use within models package)
+ */
+func findVesselByTimeWindow(vesselDB map[string]string, targetTime string, windowMinutes int) *string {
+	unknown := "UNKNOWN"
+
+	// This is a simplified version - the full implementation is in scraper package
+	// For the models package, we just do a direct lookup first
+	if vessel, ok := vesselDB[targetTime]; ok {
+		return &vessel
+	}
+
+	// If no exact match, return UNKNOWN
+	// The scraper package has the full time-window matching logic
+	return &unknown
+}
+
+/*
+ * Helper function to calculate estimated time by adding minutes to a base time
+ */
+func calculateEstimatedTime(baseTime string, addMinutes int) string {
+	// Parse base time
+	layouts := []string{"3:04 pm", "3:04 PM", "03:04 pm", "03:04 PM", "3:04pm", "3:04PM"}
+	var baseParsed time.Time
+	var err error
+	for _, layout := range layouts {
+		baseParsed, err = time.Parse(layout, baseTime)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return baseTime // Fallback to original time if parsing fails
+	}
+
+	// Add minutes
+	estimatedParsed := baseParsed.Add(time.Duration(addMinutes) * time.Minute)
+
+	// Format back to lowercase 12-hour format
+	return strings.ToLower(estimatedParsed.Format("3:04 pm"))
 }
 
 /**************/

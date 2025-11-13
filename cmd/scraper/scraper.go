@@ -467,6 +467,11 @@ func ScrapeNonCapacityRoutes() {
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
+	// Build vessel database from departures pages
+	log.Println("ScrapeNonCapacityRoutes: Building vessel database...")
+	vesselDatabase := BuildVesselDatabase(ctx)
+	log.Printf("ScrapeNonCapacityRoutes: Vessel database built with %d terminals", len(vesselDatabase))
+
 	departureTerminals := staticdata.GetNonCapacityDepartureTerminals()
 	destinationTerminals := staticdata.GetNonCapacityDestinationTerminals()
 
@@ -490,7 +495,7 @@ func ScrapeNonCapacityRoutes() {
 				continue
 			}
 
-			if ScrapeNonCapacityRoute(document, departureTerminals[i], destinationTerminals[i][j]) {
+			if ScrapeNonCapacityRoute(document, departureTerminals[i], destinationTerminals[i][j], vesselDatabase) {
 				successCount++
 			}
 		}
@@ -507,10 +512,11 @@ func ScrapeNonCapacityRoutes() {
  * @param *goquery.Document document
  * @param string fromTerminalCode
  * @param string toTerminalCode
+ * @param map[string]map[string]string vesselDatabase - Vessel database (terminal → time → vessel)
  *
  * @return bool - true if route was successfully scraped and saved, false otherwise
  */
-func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerminalCode string) bool {
+func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerminalCode string, vesselDatabase map[string]map[string]string) bool {
 	loc, err := time.LoadLocation("America/Vancouver")
 	if err != nil {
 		log.Printf("ScrapeNonCapacityRoute: failed to load PT location: %v", err)
@@ -795,8 +801,62 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             }
         }
 
-        // Build legs from route code and events
-        legs := models.BuildLegs(route.RouteCode, events)
+        // Pre-calculate dwell time for vessel lookup
+        // We need to estimate this before building legs since BuildLegs needs it for time calculations
+        sailingDurationMin := parseDurationToMinutes(sailingDuration)
+
+        // Count stops/transfers (exclude thruFares)
+        stopCount := 0
+        for _, event := range events {
+            if event.Type == "stop" || event.Type == "transfer" {
+                stopCount++
+            }
+        }
+
+        // Estimate total travel time from leg info
+        // Build a temporary route to get leg durations
+        originCode := route.RouteCode[:3]
+        destinationCode := route.RouteCode[3:]
+        estimatedTravelMin := 0
+
+        if len(events) == 0 {
+            // Direct sailing - just one leg
+            if legInfo := staticdata.GetLegInfo(originCode, destinationCode); legInfo != nil {
+                estimatedTravelMin = legInfo.AvgDurationMin
+            }
+        } else {
+            // Multi-leg sailing - estimate each leg
+            // First leg: origin to first event terminal
+            firstEventCode := staticdata.GetTerminalCodeByName(events[0].TerminalName)
+            if legInfo := staticdata.GetLegInfo(originCode, firstEventCode); legInfo != nil {
+                estimatedTravelMin += legInfo.AvgDurationMin
+            }
+
+            // Intermediate legs: between event terminals
+            for i := 0; i < len(events)-1; i++ {
+                fromCode := staticdata.GetTerminalCodeByName(events[i].TerminalName)
+                toCode := staticdata.GetTerminalCodeByName(events[i+1].TerminalName)
+                if legInfo := staticdata.GetLegInfo(fromCode, toCode); legInfo != nil {
+                    estimatedTravelMin += legInfo.AvgDurationMin
+                }
+            }
+
+            // Final leg: last event terminal to destination
+            lastEventCode := staticdata.GetTerminalCodeByName(events[len(events)-1].TerminalName)
+            if legInfo := staticdata.GetLegInfo(lastEventCode, destinationCode); legInfo != nil {
+                estimatedTravelMin += legInfo.AvgDurationMin
+            }
+        }
+
+        // Calculate estimated average dwell time
+        avgDwellMin := 0
+        estimatedDwellMin := sailingDurationMin - estimatedTravelMin
+        if stopCount > 0 && estimatedDwellMin > 0 {
+            avgDwellMin = estimatedDwellMin / stopCount
+        }
+
+        // Now build legs with vessel lookup using calculated avg dwell time
+        legs := models.BuildLegs(route.RouteCode, events, depTime, vesselDatabase, avgDwellMin)
 
         s := models.NonCapacitySailing{
             DepartureTime:   depTime,
@@ -814,8 +874,7 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             s.ID = generateSailingID(route.RouteCode, currentDate, s.DepartureTime)
         }
 
-        // Calculate dwell time (time spent at stops)
-        sailingDurationMin := parseDurationToMinutes(sailingDuration)
+        // Calculate actual dwell time (time spent at stops) from built legs
         totalTravelMin := 0
         for _, leg := range legs {
             if leg.AvgDurationMin != nil {
@@ -825,17 +884,9 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 
         s.TotalTravelMin = totalTravelMin
         s.TotalDwellMin = sailingDurationMin - totalTravelMin
-
-        // Count stops/transfers (exclude thruFares)
-        stopCount := 0
-        for _, event := range events {
-            if event.Type == "stop" || event.Type == "transfer" {
-                stopCount++
-            }
-        }
         s.StopCount = stopCount
 
-        // Calculate average dwell time per stop
+        // Calculate actual average dwell time per stop
         if stopCount > 0 && s.TotalDwellMin > 0 {
             avgDwell := s.TotalDwellMin / stopCount
             s.AvgDwellPerStopMin = &avgDwell
@@ -893,6 +944,162 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 /********************/
 /* Helper Functions */
 /********************/
+
+/*
+ * BuildVesselDatabase
+ *
+ * Scrapes BC Ferries departures pages for all non-capacity terminals to build a database
+ * of vessel names indexed by terminal code and departure time.
+ *
+ * @param ctx context.Context - Chromedp context for rendering pages
+ *
+ * @return map[string]map[string]string - Map of terminal code → (departure time → vessel name)
+ */
+func BuildVesselDatabase(ctx context.Context) map[string]map[string]string {
+	log.Println("BuildVesselDatabase: Starting to build vessel database...")
+
+	vesselDB := make(map[string]map[string]string)
+	terminals := staticdata.GetNonCapacityDepartureTerminals()
+
+	for _, terminalCode := range terminals {
+		url := fmt.Sprintf("https://www.bcferries.com/current-conditions/departures?terminalCode=%s", terminalCode)
+		log.Printf("BuildVesselDatabase: Fetching departures for terminal %s", terminalCode)
+
+		html, err := fetchWithChromedp(ctx, url)
+		if err != nil {
+			log.Printf("BuildVesselDatabase: Failed to fetch %s: %v", url, err)
+			vesselDB[terminalCode] = make(map[string]string)
+			continue
+		}
+
+		document, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+		if err != nil {
+			log.Printf("BuildVesselDatabase: Failed to parse HTML for %s: %v", terminalCode, err)
+			vesselDB[terminalCode] = make(map[string]string)
+			continue
+		}
+
+		// Initialize map for this terminal
+		vesselDB[terminalCode] = make(map[string]string)
+		sailingCount := 0
+
+		// Find all sailing rows across all tables on the page
+		document.Find("tr.padding-departures-td").Each(func(i int, row *goquery.Selection) {
+			// Extract vessel name from first column
+			vesselName := strings.TrimSpace(row.Find("td").Eq(0).Find("a[href*='/on-the-ferry/our-fleet/']").Text())
+
+			// Extract SCHEDULED time from second column
+			scheduledTime := ""
+			row.Find("td").Eq(1).Find("ul.departures-time-ul").Each(func(j int, ul *goquery.Selection) {
+				// Look for the UL that contains "SCHEDULED:"
+				if strings.Contains(ul.Text(), "SCHEDULED:") {
+					// Extract the time from the span
+					timeText := strings.TrimSpace(ul.Find("span.text-lowercase").Text())
+					if timeText != "" {
+						// Convert to lowercase (e.g., "7:10 AM" → "7:10 am")
+						scheduledTime = strings.ToLower(timeText)
+					}
+				}
+			})
+
+			// Only store if we found both vessel name and scheduled time
+			if vesselName != "" && scheduledTime != "" {
+				vesselDB[terminalCode][scheduledTime] = vesselName
+				sailingCount++
+			}
+		})
+
+		log.Printf("BuildVesselDatabase: Terminal %s - extracted %d sailings", terminalCode, sailingCount)
+	}
+
+	log.Printf("BuildVesselDatabase: Completed! Built database for %d terminals", len(vesselDB))
+	return vesselDB
+}
+
+/*
+ * FindVesselByTimeWindow
+ *
+ * Searches for a vessel departing from a terminal within a time window.
+ * Returns the vessel name if found, or a pointer to "UNKNOWN" if not found.
+ *
+ * @param vesselDB map[string]string - Map of departure time → vessel name for a specific terminal
+ * @param targetTime string - Target departure time in lowercase 12-hour format (e.g., "5:35 pm")
+ * @param windowMinutes int - Search window in minutes (±windowMinutes from targetTime)
+ *
+ * @return *string - Pointer to vessel name, or pointer to "UNKNOWN" if not found
+ */
+func FindVesselByTimeWindow(vesselDB map[string]string, targetTime string, windowMinutes int) *string {
+	unknown := "UNKNOWN"
+
+	// Parse target time
+	layouts := []string{"3:04 pm", "3:04 PM", "03:04 pm", "03:04 PM", "3:04pm", "3:04PM"}
+	var targetParsed time.Time
+	var err error
+	for _, layout := range layouts {
+		targetParsed, err = time.Parse(layout, targetTime)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		log.Printf("FindVesselByTimeWindow: Failed to parse target time '%s': %v", targetTime, err)
+		return &unknown
+	}
+
+	// Search for vessels within the time window
+	type match struct {
+		vessel   string
+		timeDiff time.Duration
+	}
+	var matches []match
+
+	for depTimeStr, vesselName := range vesselDB {
+		// Parse departure time
+		var depTimeParsed time.Time
+		for _, layout := range layouts {
+			depTimeParsed, err = time.Parse(layout, depTimeStr)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			continue
+		}
+
+		// Calculate time difference
+		diff := depTimeParsed.Sub(targetParsed)
+		absDiff := diff
+		if absDiff < 0 {
+			absDiff = -absDiff
+		}
+
+		// Check if within window
+		if absDiff <= time.Duration(windowMinutes)*time.Minute {
+			matches = append(matches, match{vessel: vesselName, timeDiff: absDiff})
+		}
+	}
+
+	// No matches found
+	if len(matches) == 0 {
+		log.Printf("FindVesselByTimeWindow: No vessel found within %d minutes of %s", windowMinutes, targetTime)
+		return &unknown
+	}
+
+	// Find closest match
+	closest := matches[0]
+	for _, m := range matches[1:] {
+		if m.timeDiff < closest.timeDiff {
+			closest = m
+		}
+	}
+
+	// Log if multiple matches
+	if len(matches) > 1 {
+		log.Printf("FindVesselByTimeWindow: Multiple matches (%d) within window for %s, picking closest: %s", len(matches), targetTime, closest.vessel)
+	}
+
+	return &closest.vessel
+}
 
 /*
  * fetchWithChromedp
