@@ -12,8 +12,8 @@ import (
  *
  * Initializes and starts scheduled background scraping tasks using gocron.
  *
- * - Scrapes capacity route data every 1 minute.
- * - Scrapes non-capacity route data every 4 hours.
+ * - Scrapes capacity route data immediately on startup, then every 1 minute.
+ * - Scrapes non-capacity route data immediately on startup, then every 4 hours.
  *
  * The scheduler runs asynchronously in the background.
  *
@@ -22,6 +22,11 @@ import (
 func SetupCron() {
 	s := gocron.NewScheduler(time.UTC)
 
+	// Run scrapers immediately on startup
+	go scraper.ScrapeCapacityRoutes()
+	go scraper.ScrapeNonCapacityRoutes()
+
+	// Schedule regular intervals
 	s.Every(1).Minute().Do(func() {
 		scraper.ScrapeCapacityRoutes()
 	})

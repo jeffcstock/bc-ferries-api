@@ -203,3 +203,26 @@ func GetNonCapacityDestinationTerminals() [][]string {
 
 	return destinationTerminals[:]
 }
+
+/*
+ * GetTerminalCodeByName
+ *
+ * Maps a terminal name in format "ServiceArea (Name)" to its terminal code
+ * e.g., "Galiano Island (Sturdies Bay)" -> "PSB"
+ *
+ * @param terminalName string - Terminal name in format "ServiceArea (Name)"
+ * @return string - Terminal code (empty string if not found)
+ */
+func GetTerminalCodeByName(terminalName string) string {
+	terminals := GetTerminals()
+
+	for code, terminal := range terminals {
+		// Format: "ServiceArea (Name)"
+		expectedFormat := terminal.ServiceArea + " (" + terminal.Name + ")"
+		if expectedFormat == terminalName {
+			return code
+		}
+	}
+
+	return "" // Not found
+}

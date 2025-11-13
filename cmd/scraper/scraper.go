@@ -744,11 +744,15 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             }
         }
 
+        // Build legs from route code and events
+        legs := models.BuildLegs(route.RouteCode, events)
+
         s := models.NonCapacitySailing{
             DepartureTime:   depTime,
             ArrivalTime:     arrTime,
             SailingDuration: sailingDuration,
             Events:          events,
+            Legs:            legs,
         }
         if len(statuses) > 0 {
             s.VesselStatus = strings.Join(statuses, " | ")
