@@ -76,11 +76,13 @@ type NonCapacitySailing struct {
 	DepartureTime      string         `json:"time"`
 	ArrivalTime        string         `json:"arrivalTime"`
 	SailingDuration    string         `json:"sailingDuration"`
+	IsNonStop          bool           `json:"isNonStop"`                     // True if direct sailing with no stops/transfers
+	HasStops           bool           `json:"hasStops"`                      // True if sailing contains at least one stop event
+	IsThruFare         bool           `json:"isThruFare"`                    // True if sailing contains at least one thru-fare event
 	Events             []SailingEvent `json:"events,omitempty"`
 	Legs               []Leg          `json:"legs,omitempty"`
 	TotalTravelMin     int            `json:"total_travel_min"`              // Sum of leg sailing durations
 	TotalDwellMin      int            `json:"total_dwell_min"`               // Time spent at stops/terminals
-	StopCount          int            `json:"stop_count"`                    // Number of stops/transfers (excludes thruFares)
 	AvgDwellPerStopMin *int           `json:"avg_dwell_per_stop_min,omitempty"` // Average dwell time per stop
 }
 
@@ -93,7 +95,6 @@ type Leg struct {
 	LegNumber           int                  `json:"leg_number"`
 	OriginTerminal      staticdata.Terminal  `json:"origin_terminal"`
 	DestinationTerminal staticdata.Terminal  `json:"destination_terminal"`
-	EventType           *string              `json:"event_type"`      // null for final leg, populated for intermediate legs
 	DistanceKm          *float64             `json:"distance_km"`     // null if not available
 	AvgDurationMin      *int                 `json:"avg_duration_min"` // null if not available
 	VesselName          *string              `json:"vessel_name"`      // null if not available, "UNKNOWN" if lookup failed
@@ -136,7 +137,6 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 			LegNumber:           1,
 			OriginTerminal:      originTerminal,
 			DestinationTerminal: destinationTerminal,
-			EventType:           nil,
 		}
 
 		// Lookup distance and duration
@@ -192,7 +192,6 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 			LegNumber:           len(legs) + 1,
 			OriginTerminal:      currentOrigin,
 			DestinationTerminal: eventTerminal,
-			EventType:           &event.Type,
 		}
 
 		// Lookup distance and duration
@@ -236,7 +235,6 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 		LegNumber:           len(legs) + 1,
 		OriginTerminal:      currentOrigin,
 		DestinationTerminal: destinationTerminal,
-		EventType:           nil,
 	}
 
 	// Lookup distance and duration

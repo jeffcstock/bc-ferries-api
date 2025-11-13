@@ -858,10 +858,24 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
         // Now build legs with vessel lookup using calculated avg dwell time
         legs := models.BuildLegs(route.RouteCode, events, depTime, vesselDatabase, avgDwellMin)
 
+        // Check event types
+        hasStops := false
+        isThruFare := false
+        for _, event := range events {
+            if event.Type == "stop" {
+                hasStops = true
+            } else if event.Type == "thruFare" {
+                isThruFare = true
+            }
+        }
+
         s := models.NonCapacitySailing{
             DepartureTime:   depTime,
             ArrivalTime:     arrTime,
             SailingDuration: sailingDuration,
+            IsNonStop:       len(legs) == 1,
+            HasStops:        hasStops,
+            IsThruFare:      isThruFare,
             Events:          events,
             Legs:            legs,
         }
@@ -881,7 +895,6 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 
         s.TotalTravelMin = totalTravelMin
         s.TotalDwellMin = sailingDurationMin - totalTravelMin
-        s.StopCount = stopCount
 
         // Calculate actual average dwell time per stop
         if stopCount > 0 && s.TotalDwellMin > 0 {

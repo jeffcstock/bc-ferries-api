@@ -41,9 +41,21 @@
                         "pattern": "^(1[0-2]|0?[1-9]):[0-5][0-9] [ap]m$"
                       }
                     ]
+                  },
+                  "isNonStop": {
+                    "type": "boolean",
+                    "description": "True if this is a direct sailing with no stops or transfers"
+                  },
+                  "hasStops": {
+                    "type": "boolean",
+                    "description": "True if this sailing contains at least one stop event"
+                  },
+                  "isThruFare": {
+                    "type": "boolean",
+                    "description": "True if this sailing contains at least one thru-fare event"
                   }
                 },
-                "required": ["time", "arrivalTime"]
+                "required": ["time", "arrivalTime", "isNonStop", "hasStops", "isThruFare"]
               }
             }
           },
