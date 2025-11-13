@@ -814,6 +814,33 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
             s.ID = generateSailingID(route.RouteCode, currentDate, s.DepartureTime)
         }
 
+        // Calculate dwell time (time spent at stops)
+        sailingDurationMin := parseDurationToMinutes(sailingDuration)
+        totalTravelMin := 0
+        for _, leg := range legs {
+            if leg.AvgDurationMin != nil {
+                totalTravelMin += *leg.AvgDurationMin
+            }
+        }
+
+        s.TotalTravelMin = totalTravelMin
+        s.TotalDwellMin = sailingDurationMin - totalTravelMin
+
+        // Count stops/transfers (exclude thruFares)
+        stopCount := 0
+        for _, event := range events {
+            if event.Type == "stop" || event.Type == "transfer" {
+                stopCount++
+            }
+        }
+        s.StopCount = stopCount
+
+        // Calculate average dwell time per stop
+        if stopCount > 0 && s.TotalDwellMin > 0 {
+            avgDwell := s.TotalDwellMin / stopCount
+            s.AvgDwellPerStopMin = &avgDwell
+        }
+
         if s.DepartureTime != "" || s.ArrivalTime != "" {
             route.Sailings = append(route.Sailings, s)
         }
@@ -958,4 +985,56 @@ func convertTo24HourFormat(time12h string) string {
 func generateSailingID(routeCode, date, departureTime string) string {
 	time24h := convertTo24HourFormat(departureTime)
 	return fmt.Sprintf("%s-%s-%s", routeCode, date, time24h)
+}
+
+/*
+ * parseDurationToMinutes
+ *
+ * Converts a duration string to total minutes.
+ * Handles multiple formats from BC Ferries schedules.
+ *
+ * Examples:
+ *   "2h 15m" → 135
+ *   "1h 30m" → 90
+ *   "55m" → 55
+ *   "01:40" → 100
+ *   "00:50" → 50
+ *
+ * @param string duration - Duration string in various formats
+ *
+ * @return int - Total duration in minutes (0 if parsing fails)
+ */
+func parseDurationToMinutes(duration string) int {
+	if duration == "" {
+		return 0
+	}
+
+	totalMinutes := 0
+
+	// Format 1: "2h 15m" or "1h" or "45m"
+	hoursMatch := regexp.MustCompile(`(\d+)h`).FindStringSubmatch(duration)
+	if len(hoursMatch) > 1 {
+		hours, _ := strconv.Atoi(hoursMatch[1])
+		totalMinutes += hours * 60
+	}
+
+	minutesMatch := regexp.MustCompile(`(\d+)m`).FindStringSubmatch(duration)
+	if len(minutesMatch) > 1 {
+		minutes, _ := strconv.Atoi(minutesMatch[1])
+		totalMinutes += minutes
+	}
+
+	// Format 2: "01:40" (HH:MM)
+	if totalMinutes == 0 && strings.Contains(duration, ":") {
+		parts := strings.Split(duration, ":")
+		if len(parts) == 2 {
+			hours, err1 := strconv.Atoi(parts[0])
+			minutes, err2 := strconv.Atoi(parts[1])
+			if err1 == nil && err2 == nil {
+				totalMinutes = hours*60 + minutes
+			}
+		}
+	}
+
+	return totalMinutes
 }

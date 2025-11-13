@@ -67,14 +67,18 @@ type NonCapacityRouteInfo struct {
 }
 
 type NonCapacitySailing struct {
-	ID              string         `json:"id"`
-	DepartureTime   string         `json:"time"`
-	ArrivalTime     string         `json:"arrivalTime"`
-	SailingDuration string         `json:"sailingDuration"`
-	VesselName      string         `json:"vesselName"`
-	VesselStatus    string         `json:"vesselStatus"`
-	Events          []SailingEvent `json:"events,omitempty"`
-	Legs            []Leg          `json:"legs,omitempty"`
+	ID                 string         `json:"id"`
+	DepartureTime      string         `json:"time"`
+	ArrivalTime        string         `json:"arrivalTime"`
+	SailingDuration    string         `json:"sailingDuration"`
+	VesselName         string         `json:"vesselName"`
+	VesselStatus       string         `json:"vesselStatus"`
+	Events             []SailingEvent `json:"events,omitempty"`
+	Legs               []Leg          `json:"legs,omitempty"`
+	TotalTravelMin     int            `json:"total_travel_min"`              // Sum of leg sailing durations
+	TotalDwellMin      int            `json:"total_dwell_min"`               // Time spent at stops/terminals
+	StopCount          int            `json:"stop_count"`                    // Number of stops/transfers (excludes thruFares)
+	AvgDwellPerStopMin *int           `json:"avg_dwell_per_stop_min,omitempty"` // Average dwell time per stop
 }
 
 type SailingEvent struct {
