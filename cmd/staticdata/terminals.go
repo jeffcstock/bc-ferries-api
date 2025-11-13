@@ -125,20 +125,21 @@ func GetCapacityDestinationTerminals() [][]string {
  * GetNonCapacityDepartureTerminals
  *
  * Returns an array of departure terminals for non-capacity routes
+ * Limited to Southern Gulf Islands routes only to reduce memory usage
  *
  * @return []string
  */
 func GetNonCapacityDepartureTerminals() []string {
-	departureTerminals := [46]string{
-		"TSA", "HSB", "SWB", "NAN", "DUK",
-		"NAH", "CMX", "PPH", "BTW", "BKY",
-		"CAM", "CHM", "CFT", "MIL", "MCN",
-		"LNG", "PWR", "SLT", "ERL", "TEX",
-		"POB", "PSB", "PVB", "PST", "GAB",
-		"PEN", "PLH", "VES", "FUL", "THT",
-		"ALR", "DNM", "DNE", "HRN", "SOI",
-		"HRB", "QDR", "BEC", "PBB", "POF",
-		"SHW", "KLE", "PPR", "PSK", "ALF", "BOW",
+	// Southern Gulf Islands routes only
+	departureTerminals := [8]string{
+		"TSA",  // Tsawwassen
+		"SWB",  // Swartz Bay
+		"POB",  // Otter Bay (Pender Island)
+		"PSB",  // Sturdies Bay (Galiano Island)
+		"PVB",  // Village Bay (Mayne Island)
+		"PST",  // Lyall Harbour (Saturna Island)
+		"PLH",  // Long Harbour (Salt Spring Island)
+		"FUL",  // Fulford Harbour (Salt Spring Island)
 	}
 
 	return departureTerminals[:]
@@ -148,57 +149,22 @@ func GetNonCapacityDepartureTerminals() []string {
  * GetNonCapacityDestinationTerminals
  *
  * Returns an array of destination terminals for non-capacity routes
+ * Limited to Southern Gulf Islands routes only to reduce memory usage
  *
  * @return [][]string
  */
 func GetNonCapacityDestinationTerminals() [][]string {
-	destinationTerminals := [46][]string{
-		{"PSB", "PVB", "DUK", "POB", "PLH", "PST", "SWB"},
-		{"BOW", "NAN", "LNG"},
-		{"PSB", "PVB", "POB", "FUL", "PST", "TSA", "PSB", "PVB", "POB", "FUL", "PST"},
-		{"HSB"},
-		{"TSA"},
-		{"GAB"},
-		{"PWR"},
-		{"PBB", "BEC", "KLE", "POF", "PPR", "SHW", "PBB", "BEC", "KLE", "POF", "PPR", "SHW"},
-		{"MIL"},
-		{"DNM"},
-		{"QDR"},
-		{"PEN", "THT", "PEN", "THT"},
-		{"VES"},
-		{"BTW"},
-		{"ALR", "SOI"},
-		{"HSB"},
-		{"CMX", "TEX"},
-		{"ERL"},
-		{"SLT"},
-		{"PWR"},
-		{"PSB", "PVB", "PLH", "PST", "TSA", "SWB"},
-		{"PVB", "POB", "PLH", "PST", "TSA", "SWB"},
-		{"PSB", "POB", "PLH", "PST", "TSA", "SWB"},
-		{"PSB", "PVB", "POB", "PLH", "TSA", "SWB"},
-		{"NAH"},
-		{"CHM", "THT"},
-		{"PSB", "PVB", "POB", "PST", "TSA", "SWB"},
-		{"CFT"},
-		{"SWB"},
-		{"CHM", "PEN"},
-		{"SOI", "MCN"},
-		{"BKY"},
-		{"HRN"},
-		{"DNE"},
-		{"ALR", "MCN"},
-		{"COR"},
-		{"CAM"},
-		{"PBB", "POF", "PPH", "SHW"},
-		{"BEC", "KLE", "POF", "PPH", "PPR", "SHW"},
-		{"PBB", "BEC", "PPH", "SHW"},
-		{"PBB", "BEC", "POF", "PPH"},
-		{"PBB", "PPH", "PPR", "PBB", "PPH"},
-		{"PBB", "PSK", "KLE", "PPH", "PSK"},
-		{"ALF", "PPR"},
-		{"PSK"},
-		{"HSB"},
+	// Southern Gulf Islands destinations only - using EXACT mappings from original working code
+	// Order matches GetNonCapacityDepartureTerminals: TSA, SWB, POB, PSB, PVB, PST, PLH, FUL
+	destinationTerminals := [8][]string{
+		{"PSB", "PVB", "DUK", "POB", "PLH", "PST", "SWB"},                              // From TSA (original index 0)
+		{"PSB", "PVB", "POB", "FUL", "PST", "TSA", "PSB", "PVB", "POB", "FUL", "PST"},  // From SWB (original index 2)
+		{"PSB", "PVB", "PLH", "PST", "TSA", "SWB"},                                     // From POB (original index 20)
+		{"PVB", "POB", "PLH", "PST", "TSA", "SWB"},                                     // From PSB (original index 21)
+		{"PSB", "POB", "PLH", "PST", "TSA", "SWB"},                                     // From PVB (original index 22)
+		{"PSB", "PVB", "POB", "PLH", "TSA", "SWB"},                                     // From PST (original index 23)
+		{"PSB", "PVB", "POB", "PST", "TSA", "SWB"},                                     // From PLH (original index 26)
+		{"SWB"},                                                                         // From FUL (original index 28)
 	}
 
 	return destinationTerminals[:]

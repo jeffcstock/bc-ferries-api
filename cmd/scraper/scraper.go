@@ -20,6 +20,49 @@ import (
 	"github.com/jeffcstock/bc-ferries-api/cmd/staticdata"
 )
 
+// Shared HTTP client to prevent memory leaks from creating new clients
+// HTTP clients maintain connection pools, so reusing one is more efficient
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
+
+/*
+ * CleanupOldSailings
+ *
+ * Deletes sailing records older than 48 hours from both capacity and non-capacity tables.
+ * This prevents the database from growing indefinitely and consuming memory.
+ *
+ * @return void
+ */
+func CleanupOldSailings() {
+	// Calculate the cutoff date (48 hours ago)
+	cutoffDate := time.Now().Add(-48 * time.Hour).Format("2006-01-02")
+
+	// Delete old capacity routes
+	sqlCapacity := `DELETE FROM capacity_routes WHERE date < $1`
+	result, err := db.Conn.Exec(sqlCapacity, cutoffDate)
+	if err != nil {
+		log.Printf("CleanupOldSailings: failed to delete old capacity routes: %v", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected > 0 {
+			log.Printf("CleanupOldSailings: deleted %d old capacity route(s)", rowsAffected)
+		}
+	}
+
+	// Delete old non-capacity routes
+	sqlNonCapacity := `DELETE FROM non_capacity_routes WHERE date < $1`
+	result, err = db.Conn.Exec(sqlNonCapacity, cutoffDate)
+	if err != nil {
+		log.Printf("CleanupOldSailings: failed to delete old non-capacity routes: %v", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected > 0 {
+			log.Printf("CleanupOldSailings: deleted %d old non-capacity route(s)", rowsAffected)
+		}
+	}
+}
+
 /*
  * MakeCurrentConditionsLink
  *
@@ -64,8 +107,7 @@ func ScrapeCapacityRoutes() {
 		for j := 0; j < len(destinationTerminals[i]); j++ {
 			link := MakeCurrentConditionsLink(departureTerminals[i], destinationTerminals[i][j])
 
-			// Make HTTP GET request
-			client := &http.Client{}
+			// Make HTTP GET request using shared client
 			req, err := http.NewRequest("GET", link, nil)
 			if err != nil {
 				log.Printf("ScrapeCapacityRoutes: failed to create request for %s: %v", link, err)
@@ -73,7 +115,7 @@ func ScrapeCapacityRoutes() {
 			}
 
 			req.Header.Add("User-Agent", "Mozilla")
-			response, err := client.Do(req)
+			response, err := httpClient.Do(req)
 			if err != nil {
 				log.Printf("ScrapeCapacityRoutes: failed to fetch %s: %v", link, err)
 				continue
@@ -263,7 +305,6 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
 									link := strings.ReplaceAll("https://www.bcferries.com"+href, " ", "%20")
 
 									if exists {
-										client := &http.Client{}
 										req, err := http.NewRequest("GET", link, nil)
 										if err != nil {
 											log.Printf("ScrapeCapacityRoute: failed to create details request for %s: %v", link, err)
@@ -271,7 +312,7 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
 										}
 
 										req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-										response, err := client.Do(req)
+										response, err := httpClient.Do(req)
 										if err != nil {
 											log.Printf("ScrapeCapacityRoute: failed to fetch details from %s: %v", link, err)
 											return
@@ -421,14 +462,20 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
  * @return void
  */
 func ScrapeNonCapacityRoutes() {
+	log.Println("ScrapeNonCapacityRoutes: Starting scrape of Southern Gulf Islands routes...")
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	departureTerminals := staticdata.GetNonCapacityDepartureTerminals()
 	destinationTerminals := staticdata.GetNonCapacityDestinationTerminals()
 
+	successCount := 0
+	totalAttempts := 0
+
 	for i := 0; i < len(departureTerminals); i++ {
 		for j := 0; j < len(destinationTerminals[i]); j++ {
+			totalAttempts++
 			link := MakeScheduleLink(departureTerminals[i], destinationTerminals[i][j])
 
 			html, err := fetchWithChromedp(ctx, link)
@@ -443,9 +490,13 @@ func ScrapeNonCapacityRoutes() {
 				continue
 			}
 
-			ScrapeNonCapacityRoute(document, departureTerminals[i], destinationTerminals[i][j])
+			if ScrapeNonCapacityRoute(document, departureTerminals[i], destinationTerminals[i][j]) {
+				successCount++
+			}
 		}
 	}
+
+	log.Printf("ScrapeNonCapacityRoutes: Completed! Successfully scraped %d/%d routes", successCount, totalAttempts)
 }
 
 /*
@@ -457,13 +508,13 @@ func ScrapeNonCapacityRoutes() {
  * @param string fromTerminalCode
  * @param string toTerminalCode
  *
- * @return void
+ * @return bool - true if route was successfully scraped and saved, false otherwise
  */
-func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerminalCode string) {
+func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerminalCode string) bool {
 	loc, err := time.LoadLocation("America/Vancouver")
 	if err != nil {
 		log.Printf("ScrapeNonCapacityRoute: failed to load PT location: %v", err)
-		return
+		return false
 	}
 
 	normalizeDay := func(s string) string {
@@ -503,7 +554,7 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
     }
     if scheduleTable == nil || scheduleTable.Length() == 0 {
         log.Printf("ScrapeNonCapacityRoute: seasonal schedule table not found")
-        return
+        return false
     }
 
 	// ---- Step 2: find the <thead> whose day matches today (MONDAY vs MONDAYS, any case)
@@ -540,7 +591,7 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 
 	if dayBody == nil {
 		log.Printf("ScrapeNonCapacityRoute: no tbody found for today (%s) in second table", todayNorm)
-		return
+		return false
 	}
 
     clean := func(s string) string {
@@ -780,7 +831,7 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 	sailingsJSON, err := json.Marshal(route.Sailings)
 	if err != nil {
 		log.Printf("ScrapeNonCapacityRoute: marshal error for %s: %v", route.RouteCode, err)
-		return
+		return false
 	}
 
 	sqlStatement := `
@@ -805,8 +856,11 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 	)
 	if err != nil {
 		log.Printf("ScrapeNonCapacityRoute: DB insert/update failed for %s: %v", route.RouteCode, err)
-		return
+		return false
 	}
+
+	log.Printf("ScrapeNonCapacityRoute: ✓ %s scraped successfully with %d sailing(s)", route.RouteCode, len(route.Sailings))
+	return true
 }
 
 /********************/
