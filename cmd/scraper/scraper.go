@@ -993,33 +993,80 @@ func BuildVesselDatabase(ctx context.Context) map[string]map[string]string {
 		vesselDB[terminalCode] = make(map[string]string)
 		sailingCount := 0
 
-		// Find all sailing rows across all tables on the page
-		document.Find("tr.padding-departures-td").Each(func(i int, row *goquery.Selection) {
-			// Extract vessel name from first column
-			vesselName := strings.TrimSpace(row.Find("td").Eq(0).Find("a[href*='/on-the-ferry/our-fleet/']").Text())
+		// Find all route sections - each starts with a header row containing the route
+		// Structure: <tr class="text-center"><td colspan="3"><p class="text-dark-blue"><b>Origin - Destination</b></p></td></tr>
+		// Followed by sailing rows: <tr class="padding-departures-td">...</tr>
 
-			// Extract SCHEDULED time from second column
-			scheduledTime := ""
-			row.Find("td").Eq(1).Find("ul.departures-time-ul").Each(func(j int, ul *goquery.Selection) {
-				// Look for the UL that contains "SCHEDULED:"
-				if strings.Contains(ul.Text(), "SCHEDULED:") {
-					// Extract the time from the span
-					timeText := strings.TrimSpace(ul.Find("span.text-lowercase").Text())
-					if timeText != "" {
-						// Convert to lowercase (e.g., "7:10 AM" → "7:10 am")
-						scheduledTime = strings.ToLower(timeText)
+		currentDestCode := ""
+		currentDestName := ""
+
+		rowCount := 0
+		document.Find("table tr").Each(func(rowIdx int, row *goquery.Selection) {
+			rowCount++
+			// Check if this is a route header row
+			if row.HasClass("text-center") {
+				log.Printf("BuildVesselDatabase: %s Found text-center row at index %d", terminalCode, rowIdx)
+				headerText := row.Find("p.text-dark-blue b").Text()
+				// Clean up whitespace: replace multiple spaces/newlines with single space
+				headerText = strings.Join(strings.Fields(headerText), " ")
+				log.Printf("BuildVesselDatabase: %s Header text extracted: '%s'", terminalCode, headerText)
+				if headerText != "" && strings.Contains(headerText, " - ") {
+					// Header format: "Mayne Island (Village Bay) - Vancouver (Tsawwassen)"
+					// Split by " - " and take the second part
+					parts := strings.Split(headerText, " - ")
+					if len(parts) == 2 {
+						currentDestName = strings.TrimSpace(parts[1])
+						currentDestCode = staticdata.GetTerminalCodeByName(currentDestName)
+						log.Printf("BuildVesselDatabase: %s route header: '%s' -> destCode='%s'", terminalCode, currentDestName, currentDestCode)
 					}
 				}
-			})
+				return // Skip to next row
+			}
 
-			// Only store if we found both vessel name and scheduled time
-			if vesselName != "" && scheduledTime != "" {
-				vesselDB[terminalCode][scheduledTime] = vesselName
-				sailingCount++
+			// Check if this is a sailing row
+			if row.HasClass("padding-departures-td") {
+				// Extract vessel name from first column
+				vesselName := strings.TrimSpace(row.Find("td").Eq(0).Find("a[href*='/on-the-ferry/our-fleet/']").Text())
+
+				// Extract SCHEDULED time from second column
+				scheduledTime := ""
+				row.Find("td").Eq(1).Find("ul.departures-time-ul").Each(func(j int, ul *goquery.Selection) {
+					// Look for the UL that contains "SCHEDULED:"
+					if strings.Contains(ul.Text(), "SCHEDULED:") {
+						// Extract the time from the span
+						timeText := strings.TrimSpace(ul.Find("span.text-lowercase").Text())
+						if timeText != "" {
+							// Convert to lowercase (e.g., "7:10 AM" → "7:10 am")
+							scheduledTime = strings.ToLower(timeText)
+						}
+					}
+				})
+
+				// Create composite key: time-destination to handle multiple vessels at same time
+				compositeKey := scheduledTime
+				if currentDestCode != "" {
+					compositeKey = scheduledTime + "-" + currentDestCode
+				}
+
+				// Only store if we found both vessel name and scheduled time
+				if vesselName != "" && scheduledTime != "" {
+					vesselDB[terminalCode][compositeKey] = vesselName
+					sailingCount++
+
+					// Log composite key creation for debugging
+					if currentDestCode != "" && compositeKey != scheduledTime {
+						log.Printf("BuildVesselDatabase: %s -> %s = %s (dest: %s)", terminalCode, compositeKey, vesselName, currentDestName)
+					}
+
+					// Also store with just time for backward compatibility and cases where destination is unknown
+					if _, exists := vesselDB[terminalCode][scheduledTime]; !exists {
+						vesselDB[terminalCode][scheduledTime] = vesselName
+					}
+				}
 			}
 		})
 
-		log.Printf("BuildVesselDatabase: Terminal %s - extracted %d sailings", terminalCode, sailingCount)
+		log.Printf("BuildVesselDatabase: Terminal %s - processed %d table rows, extracted %d sailings", terminalCode, rowCount, sailingCount)
 	}
 
 	log.Printf("BuildVesselDatabase: Completed! Built database for %d terminals", len(vesselDB))

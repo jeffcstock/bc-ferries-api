@@ -145,9 +145,9 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 			leg.AvgDurationMin = &legInfo.AvgDurationMin
 		}
 
-		// Lookup vessel for first leg
+		// Lookup vessel for first leg (with destination for better accuracy)
 		if terminalDB, ok := vesselDatabase[originTerminal.Code]; ok {
-			leg.VesselName = findVesselByTimeWindow(terminalDB, sailingDepartureTime, 60)
+			leg.VesselName = findVesselByTimeWindowWithDest(terminalDB, sailingDepartureTime, destinationTerminal.Code, 60)
 		}
 
 		legs = append(legs, leg)
@@ -202,9 +202,9 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 
 		// Lookup vessel name
 		if len(legs) == 0 {
-			// First leg: use sailing departure time
+			// First leg: use sailing departure time with destination
 			if terminalDB, ok := vesselDatabase[currentOrigin.Code]; ok {
-				leg.VesselName = findVesselByTimeWindow(terminalDB, sailingDepartureTime, 60)
+				leg.VesselName = findVesselByTimeWindowWithDest(terminalDB, sailingDepartureTime, eventTerminal.Code, 60)
 			}
 		} else {
 			// Subsequent legs: check previous event type
@@ -213,10 +213,10 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 				// Same vessel continues
 				leg.VesselName = legs[len(legs)-1].VesselName
 			} else if prevEvent.Type == "transfer" || prevEvent.Type == "thruFare" {
-				// Different vessel: calculate estimated departure time and lookup
+				// Different vessel: calculate estimated departure time and lookup with destination
 				estimatedTime := calculateEstimatedTime(sailingDepartureTime, elapsedMinutes+avgDwellMin)
 				if terminalDB, ok := vesselDatabase[currentOrigin.Code]; ok {
-					leg.VesselName = findVesselByTimeWindow(terminalDB, estimatedTime, 60)
+					leg.VesselName = findVesselByTimeWindowWithDest(terminalDB, estimatedTime, eventTerminal.Code, 60)
 				}
 			}
 		}
@@ -250,10 +250,10 @@ func BuildLegs(routeCode string, events []SailingEvent, sailingDepartureTime str
 			// Same vessel continues
 			finalLeg.VesselName = legs[len(legs)-1].VesselName
 		} else if lastEvent.Type == "transfer" || lastEvent.Type == "thruFare" {
-			// Different vessel: calculate estimated departure time and lookup
+			// Different vessel: calculate estimated departure time and lookup with destination
 			estimatedTime := calculateEstimatedTime(sailingDepartureTime, elapsedMinutes+avgDwellMin)
 			if terminalDB, ok := vesselDatabase[currentOrigin.Code]; ok {
-				finalLeg.VesselName = findVesselByTimeWindow(terminalDB, estimatedTime, 60)
+				finalLeg.VesselName = findVesselByTimeWindowWithDest(terminalDB, estimatedTime, destinationTerminal.Code, 60)
 			}
 		}
 	}
@@ -270,6 +270,29 @@ func findVesselByTimeWindow(vesselDB map[string]string, targetTime string, windo
 
 	// This is a simplified version - the full implementation is in scraper package
 	// For the models package, we just do a direct lookup first
+	if vessel, ok := vesselDB[targetTime]; ok {
+		return &vessel
+	}
+
+	// If no exact match, return UNKNOWN
+	// The scraper package has the full time-window matching logic
+	return &unknown
+}
+
+/*
+ * Helper function to find vessel by time window WITH destination for more accurate matching
+ * Tries composite key (time-destination) first, then falls back to just time
+ */
+func findVesselByTimeWindowWithDest(vesselDB map[string]string, targetTime string, destinationCode string, windowMinutes int) *string {
+	unknown := "UNKNOWN"
+
+	// Try composite key first: time-destination (most accurate)
+	compositeKey := targetTime + "-" + destinationCode
+	if vessel, ok := vesselDB[compositeKey]; ok {
+		return &vessel
+	}
+
+	// Fallback to just time (backward compatibility)
 	if vessel, ok := vesselDB[targetTime]; ok {
 		return &vessel
 	}
