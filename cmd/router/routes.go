@@ -3,12 +3,16 @@ package router
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/jeffcstock/bc-ferries-api/cmd/db"
 	"github.com/jeffcstock/bc-ferries-api/cmd/models"
+	"github.com/jeffcstock/bc-ferries-api/cmd/scraper"
+	"github.com/jeffcstock/bc-ferries-api/cmd/staticdata"
 )
 
 /**************/
@@ -22,6 +26,13 @@ type AllDataResponse struct {
 
 type CapacityResponse struct {
 	Routes []models.CapacityRoute `json:"routes"`
+}
+
+type VesselRouteResponse struct {
+	VesselName string                   `json:"vesselName"`
+	MMSI       *int                     `json:"mmsi"`       // nullable if not found in mapping
+	Date       string                   `json:"date"`       // ISO 8601 date "2025-11-17"
+	Movements  []scraper.VesselMovement `json:"movements"`
 }
 
 /*************/
@@ -392,6 +403,84 @@ func HealthCheck(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	w.Write(jsonString)
 }
 
+/*
+ * GetVesselRoute
+ *
+ * Returns a vessel's complete daily route by reconstructing movements from vessel database.
+ * Supports lookup by MMSI (numeric) or vessel slug (kebab-case).
+ *
+ * @param http.ResponseWriter w
+ * @param *http.Request r
+ * @param httprouter.Params ps
+ *
+ * @return void
+ */
+func GetVesselRoute(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	vesselID := ps.ByName("id")
+
+	// URL decode
+	vesselID, err := url.QueryUnescape(vesselID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid vessel ID"})
+		return
+	}
+
+	var vesselName string
+
+	// Try to parse as MMSI (integer)
+	if mmsi, err := strconv.Atoi(vesselID); err == nil {
+		// It's an MMSI - lookup vessel name
+		vesselName = staticdata.GetVesselNameByMMSI(mmsi)
+		if vesselName == "" {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "MMSI not found"})
+			return
+		}
+	} else {
+		// It's a slug - normalize to proper vessel name
+		vesselName = normalizeSlugToVesselName(vesselID)
+	}
+
+	// Get vessel database
+	vesselDB := scraper.GetVesselDatabase()
+
+	// Check if vessel database is available
+	if vesselDB == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Vessel database not yet available"})
+		return
+	}
+
+	// Reconstruct vessel route
+	movements := scraper.ReconstructVesselRoute(vesselName, vesselDB)
+
+	// Check if vessel exists
+	if len(movements) == 0 {
+		// Check if vessel name is valid (exists in MMSI map)
+		mmsi := staticdata.GetVesselMMSI(vesselName)
+		if mmsi == nil {
+			// Invalid vessel name
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Vessel not found"})
+			return
+		}
+		// Valid vessel but no movements today - return empty array
+	}
+
+	// Build response
+	response := VesselRouteResponse{
+		VesselName: vesselName,
+		MMSI:       staticdata.GetVesselMMSI(vesselName),
+		Date:       time.Now().Format("2006-01-02"), // Current date in ISO 8601
+		Movements:  movements,
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 /********************/
 /* Helper Functions */
 /********************/
@@ -516,4 +605,29 @@ func contains(s []string, str string) bool {
 		}
 	}
 	return false
+}
+
+/*
+ * normalizeSlugToVesselName
+ *
+ * Converts a kebab-case vessel slug to Title Case vessel name.
+ * Example: "salish-eagle" → "Salish Eagle"
+ *
+ * @param slug string - Vessel slug in kebab-case
+ *
+ * @return string - Vessel name in Title Case
+ */
+func normalizeSlugToVesselName(slug string) string {
+	// Split by hyphens
+	words := strings.Split(slug, "-")
+
+	// Title case each word
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(word[:1]) + strings.ToLower(word[1:])
+		}
+	}
+
+	// Join with spaces
+	return strings.Join(words, " ")
 }

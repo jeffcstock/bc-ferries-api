@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -955,6 +956,9 @@ func ScrapeNonCapacityRoute(document *goquery.Document, fromTerminalCode, toTerm
 /* Helper Functions */
 /********************/
 
+// Global vessel database variable for API access
+var globalVesselDB map[string]map[string]string
+
 /*
  * BuildVesselDatabase
  *
@@ -1070,6 +1074,10 @@ func BuildVesselDatabase(ctx context.Context) map[string]map[string]string {
 	}
 
 	log.Printf("BuildVesselDatabase: Completed! Built database for %d terminals", len(vesselDB))
+
+	// Store globally for API access
+	globalVesselDB = vesselDB
+
 	return vesselDB
 }
 
@@ -1301,4 +1309,217 @@ func parseDurationToMinutes(duration string) int {
 	}
 
 	return totalMinutes
+}
+
+/*
+ * GetVesselDatabase
+ *
+ * Returns the global vessel database for API access.
+ * This database is populated during non-capacity route scraping.
+ *
+ * @return map[string]map[string]string - Map of terminal code → (composite key → vessel name)
+ */
+func GetVesselDatabase() map[string]map[string]string {
+	return globalVesselDB
+}
+
+/********************/
+/* Vessel Route API */
+/********************/
+
+// VesselMovement represents a single departure/leg of a vessel's route
+type VesselMovement struct {
+	Origin                 staticdata.Terminal  `json:"origin"`
+	Destination            *staticdata.Terminal `json:"destination"`            // nullable
+	ScheduledDepartureTime string               `json:"scheduledDepartureTime"` // 24hr format "15:35"
+	ScheduledArrivalTime   *string              `json:"scheduledArrivalTime"`   // nullable, estimated from next movement
+}
+
+// rawMovement represents an internal vessel movement before conversion to API format
+type rawMovement struct {
+	OriginCode      string
+	DestinationCode string    // may be empty
+	DepartureTime   string    // "3:35 pm" format from scraper
+	TimeOrder       time.Time // for sorting
+}
+
+/*
+ * ReconstructVesselRoute
+ *
+ * Traces a vessel's movements from the vessel database.
+ * Returns movements sorted chronologically with full terminal objects.
+ *
+ * @param vesselName string - The vessel name to search for (case-insensitive)
+ * @param vesselDB map[string]map[string]string - The vessel database
+ *
+ * @return []VesselMovement - Array of vessel movements sorted by time
+ */
+func ReconstructVesselRoute(vesselName string, vesselDB map[string]map[string]string) []VesselMovement {
+	log.Printf("ReconstructVesselRoute: Starting reconstruction for vessel '%s'", vesselName)
+	var rawMovements []rawMovement
+
+	// Iterate through all terminals and all composite keys
+	// Note: Use case-insensitive comparison since vessel names may vary in casing
+	vesselNameLower := strings.ToLower(vesselName)
+
+	// Track which terminal+time combinations have composite keys
+	compositeKeysMap := make(map[string]bool)
+
+	// First pass: collect all composite keys
+	for terminalCode, timeMap := range vesselDB {
+		for compositeKey, vessel := range timeMap {
+			if strings.ToLower(vessel) == vesselNameLower {
+				parts := strings.Split(compositeKey, "-")
+				if len(parts) > 1 {
+					// This is a composite key - mark it
+					compositeKeysMap[terminalCode+"|"+parts[0]] = true
+				}
+			}
+		}
+	}
+
+	// Second pass: collect movements, preferring composite keys but allowing bare keys when no composite exists
+	for terminalCode, timeMap := range vesselDB {
+		for compositeKey, vessel := range timeMap {
+			if strings.ToLower(vessel) == vesselNameLower {
+				log.Printf("ReconstructVesselRoute: Found match at terminal %s, key %s", terminalCode, compositeKey)
+				// Parse composite key: "3:35 pm-POB" or "3:35 pm" (no destination)
+				parts := strings.Split(compositeKey, "-")
+				departureTime := parts[0]
+				destinationCode := ""
+
+				if len(parts) > 1 {
+					// Composite key with destination
+					destinationCode = parts[1]
+				} else {
+					// Bare time key - only include if there's no composite key for this terminal+time
+					uniqueKey := terminalCode + "|" + departureTime
+					if compositeKeysMap[uniqueKey] {
+						log.Printf("ReconstructVesselRoute: Skipping bare time key %s at %s (composite key exists)", compositeKey, terminalCode)
+						continue
+					}
+					log.Printf("ReconstructVesselRoute: Including bare time key %s at %s (no composite key)", compositeKey, terminalCode)
+				}
+
+				// Parse time for sorting
+				timeOrder, err := parseTime(departureTime)
+				if err != nil {
+					log.Printf("ReconstructVesselRoute: Failed to parse time '%s': %v", departureTime, err)
+					continue // Skip if can't parse time
+				}
+
+				rawMovements = append(rawMovements, rawMovement{
+					OriginCode:      terminalCode,
+					DestinationCode: destinationCode,
+					DepartureTime:   departureTime,
+					TimeOrder:       timeOrder,
+				})
+			}
+		}
+	}
+
+	// Sort by time
+	sort.Slice(rawMovements, func(i, j int) bool {
+		return rawMovements[i].TimeOrder.Before(rawMovements[j].TimeOrder)
+	})
+
+	// Convert to VesselMovement with full terminal objects
+	terminals := staticdata.GetTerminals()
+	movements := make([]VesselMovement, 0, len(rawMovements))
+
+	for i, raw := range rawMovements {
+		// Find the destination first (next movement's origin)
+		var destCode string
+		for j := i + 1; j < len(rawMovements); j++ {
+			if rawMovements[j].OriginCode != rawMovements[j].DestinationCode {
+				destCode = rawMovements[j].OriginCode
+				break
+			}
+		}
+
+		// Skip movements where origin equals the computed destination
+		if destCode != "" && raw.OriginCode == destCode {
+			log.Printf("ReconstructVesselRoute: Skipping invalid movement where origin == destination (%s @ %s)", raw.OriginCode, raw.DepartureTime)
+			continue
+		}
+
+		log.Printf("ReconstructVesselRoute: Movement %d (%s @ %s) -> next stop: %s", i, raw.OriginCode, raw.DepartureTime, destCode)
+
+		movement := VesselMovement{
+			ScheduledDepartureTime: convertTo24Hour(raw.DepartureTime),
+		}
+
+		// Set origin terminal
+		if originTerminal, ok := terminals[raw.OriginCode]; ok {
+			movement.Origin = originTerminal
+		} else {
+			log.Printf("ReconstructVesselRoute: Origin terminal '%s' not found", raw.OriginCode)
+			continue // Skip if origin terminal not found
+		}
+
+		// Set destination terminal
+		if destCode != "" {
+			if destTerminal, ok := terminals[destCode]; ok {
+				movement.Destination = &destTerminal
+			}
+		} else {
+			log.Printf("ReconstructVesselRoute: NO NEXT STOP (last movement)")
+		}
+
+		// Estimate scheduled arrival time from next VALID movement's departure
+		// Find the next movement where origin != destination
+		for j := i + 1; j < len(rawMovements); j++ {
+			if rawMovements[j].OriginCode != rawMovements[j].DestinationCode {
+				arrivalTime := convertTo24Hour(rawMovements[j].DepartureTime)
+				movement.ScheduledArrivalTime = &arrivalTime
+				break
+			}
+		}
+
+		movements = append(movements, movement)
+	}
+
+	return movements
+}
+
+/*
+ * parseTime
+ *
+ * Converts a time string to time.Time for sorting.
+ * Handles various 12-hour time formats.
+ *
+ * @param timeStr string - Time string in 12-hour format (e.g., "3:35 pm")
+ *
+ * @return time.Time - Parsed time
+ * @return error - Error if parsing fails
+ */
+func parseTime(timeStr string) (time.Time, error) {
+	layouts := []string{"3:04 pm", "3:04 PM", "03:04 pm", "03:04 PM"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, timeStr); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse time: %s", timeStr)
+}
+
+/*
+ * convertTo24Hour
+ *
+ * Converts 12-hour time format to 24-hour format (HH:MM).
+ * Different from convertTo24HourFormat which returns HHMM.
+ *
+ * @param time12hr string - Time in 12-hour format (e.g., "3:35 pm")
+ *
+ * @return string - Time in 24-hour format with colon (e.g., "15:35")
+ */
+func convertTo24Hour(time12hr string) string {
+	layouts := []string{"3:04 pm", "3:04 PM", "03:04 pm", "03:04 PM"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, time12hr); err == nil {
+			return t.Format("15:04")
+		}
+	}
+	log.Printf("convertTo24Hour: Failed to parse '%s', returning as-is", time12hr)
+	return time12hr // Return as-is if can't parse
 }

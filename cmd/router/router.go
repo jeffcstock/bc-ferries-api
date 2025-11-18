@@ -39,6 +39,10 @@ func SetupRouter() *httprouter.Router {
 	router.GET("/v2/noncapacity/:routeCode", GetSingleNonCapacityRoute)
 	router.GET("/v2/noncapacity/:routeCode/", GetSingleNonCapacityRoute)
 
+	// Vessel routes
+	router.GET("/vessels/:id", GetVesselRoute)
+	router.GET("/vessels/:id/", GetVesselRoute)
+
 	// V1 Routes (with and without trailing slash)
 	router.GET("/api", GetAllSailings)
 	router.GET("/api/", GetAllSailings)
