@@ -1437,6 +1437,11 @@ func ReconstructVesselRoute(vesselName string, vesselDB map[string]map[string]st
 			}
 		}
 
+		// If no next movement (last sailing), use composite key destination
+		if destCode == "" && raw.DestinationCode != "" {
+			destCode = raw.DestinationCode
+		}
+
 		// Skip movements where origin equals the computed destination
 		if destCode != "" && raw.OriginCode == destCode {
 			log.Printf("ReconstructVesselRoute: Skipping invalid movement where origin == destination (%s @ %s)", raw.OriginCode, raw.DepartureTime)
