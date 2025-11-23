@@ -1,4 +1,17 @@
-.PHONY: rebuild up down restart logs build clean
+.PHONY: help rebuild up down restart logs build clean status
+
+# Default target - show help
+help:
+	@echo "Available targets:"
+	@echo "  make rebuild  - Rebuild everything from scratch (stops, removes volumes, rebuilds, starts)"
+	@echo "  make up       - Start containers"
+	@echo "  make down     - Stop containers"
+	@echo "  make clean    - Stop containers and remove volumes"
+	@echo "  make restart  - Restart containers (without rebuilding)"
+	@echo "  make logs     - View logs (follows)"
+	@echo "  make build    - Build containers without starting"
+	@echo "  make status   - Show container status"
+	@echo "  make help     - Show this help message"
 
 # Rebuild everything from scratch (stops, removes volumes, rebuilds, starts)
 rebuild:

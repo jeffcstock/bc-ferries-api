@@ -2,8 +2,10 @@ package router
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +30,20 @@ type CapacityResponse struct {
 	Routes []models.CapacityRoute `json:"routes"`
 }
 
+type RawSighting struct {
+	Terminal     string `json:"terminal"`     // Terminal code (e.g., "TSA")
+	TerminalName string `json:"terminalName"` // Full terminal name
+	Time         string `json:"time"`         // 12-hour format from scraper (e.g., "7:00 am")
+	Time24h      string `json:"time24h"`      // 24-hour format (e.g., "07:00")
+	SourceURL    string `json:"sourceUrl"`    // BC Ferries URL where this was scraped
+}
+
 type VesselRouteResponse struct {
-	VesselName string                   `json:"vesselName"`
-	MMSI       *int                     `json:"mmsi"`       // nullable if not found in mapping
-	Date       string                   `json:"date"`       // ISO 8601 date "2025-11-17"
-	Movements  []scraper.VesselMovement `json:"movements"`
+	VesselName   string                   `json:"vesselName"`
+	MMSI         *int                     `json:"mmsi"`        // nullable if not found in mapping
+	Date         string                   `json:"date"`        // ISO 8601 date "2025-11-17"
+	Movements    []scraper.VesselMovement `json:"movements"`   // Inferred route
+	RawSightings []RawSighting            `json:"rawSightings"` // Raw data points from scraper
 }
 
 /*************/
@@ -404,6 +415,154 @@ func HealthCheck(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 }
 
 /*
+ * GetVesselDatabaseDebug
+ *
+ * Returns the complete vessel database for debugging purposes.
+ * Shows all vessels, terminals, and departure times scraped from BC Ferries.
+ *
+ * Response format:
+ * {
+ *   "scrapedAt": "2025-11-23T10:30:00Z",
+ *   "terminals": {
+ *     "TSA": {
+ *       "terminalName": "Tsawwassen",
+ *       "departures": [
+ *         {"time": "7:00 am", "time24h": "07:00", "vesselName": "Salish Eagle"},
+ *         ...
+ *       ]
+ *     },
+ *     ...
+ *   },
+ *   "vessels": {
+ *     "Salish Eagle": {
+ *       "sightings": [
+ *         {"terminal": "TSA", "terminalName": "Tsawwassen", "time": "7:00 am", "time24h": "07:00"},
+ *         ...
+ *       ]
+ *     },
+ *     ...
+ *   }
+ * }
+ *
+ * @param http.ResponseWriter w
+ * @param *http.Request r
+ * @param httprouter.Params ps
+ *
+ * @return void
+ */
+func GetVesselDatabaseDebug(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	vesselDB := scraper.GetVesselDatabase()
+
+	if vesselDB == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Vessel database not yet available"})
+		return
+	}
+
+	terminals := staticdata.GetTerminals()
+
+	// Build response organized by terminals and vessels
+	type Departure struct {
+		Time       string `json:"time"`
+		Time24h    string `json:"time24h"`
+		VesselName string `json:"vesselName"`
+	}
+
+	type TerminalDebugInfo struct {
+		TerminalName string      `json:"terminalName"`
+		TerminalCode string      `json:"terminalCode"`
+		Departures   []Departure `json:"departures"`
+	}
+
+	type VesselSighting struct {
+		Terminal     string `json:"terminal"`
+		TerminalName string `json:"terminalName"`
+		Time         string `json:"time"`
+		Time24h      string `json:"time24h"`
+	}
+
+	type VesselDebugInfo struct {
+		MMSI      *int             `json:"mmsi"`
+		Sightings []VesselSighting `json:"sightings"`
+	}
+
+	response := map[string]interface{}{
+		"scrapedAt": time.Now().Format(time.RFC3339),
+		"terminals": make(map[string]TerminalDebugInfo),
+		"vessels":   make(map[string]VesselDebugInfo),
+	}
+
+	terminalsMap := response["terminals"].(map[string]TerminalDebugInfo)
+	vesselsMap := response["vessels"].(map[string]VesselDebugInfo)
+
+	// Populate terminals view
+	for terminalCode, timeMap := range vesselDB {
+		terminalName := terminalCode
+		if terminal, ok := terminals[terminalCode]; ok {
+			terminalName = terminal.Name
+		}
+
+		departures := []Departure{}
+		for departureTime, vesselName := range timeMap {
+			departures = append(departures, Departure{
+				Time:       departureTime,
+				Time24h:    convertTo24HourFormatHelper(departureTime),
+				VesselName: vesselName,
+			})
+		}
+
+		// Sort departures by time
+		sort.Slice(departures, func(i, j int) bool {
+			return departures[i].Time24h < departures[j].Time24h
+		})
+
+		terminalsMap[terminalCode] = TerminalDebugInfo{
+			TerminalName: terminalName,
+			TerminalCode: terminalCode,
+			Departures:   departures,
+		}
+	}
+
+	// Populate vessels view
+	for terminalCode, timeMap := range vesselDB {
+		terminalName := terminalCode
+		if terminal, ok := terminals[terminalCode]; ok {
+			terminalName = terminal.Name
+		}
+
+		for departureTime, vesselName := range timeMap {
+			if _, exists := vesselsMap[vesselName]; !exists {
+				vesselsMap[vesselName] = VesselDebugInfo{
+					MMSI:      staticdata.GetVesselMMSI(vesselName),
+					Sightings: []VesselSighting{},
+				}
+			}
+
+			vesselInfo := vesselsMap[vesselName]
+			vesselInfo.Sightings = append(vesselInfo.Sightings, VesselSighting{
+				Terminal:     terminalCode,
+				TerminalName: terminalName,
+				Time:         departureTime,
+				Time24h:      convertTo24HourFormatHelper(departureTime),
+			})
+			vesselsMap[vesselName] = vesselInfo
+		}
+	}
+
+	// Sort sightings for each vessel by time
+	for vesselName, vesselInfo := range vesselsMap {
+		sort.Slice(vesselInfo.Sightings, func(i, j int) bool {
+			return vesselInfo.Sightings[i].Time24h < vesselInfo.Sightings[j].Time24h
+		})
+		vesselsMap[vesselName] = vesselInfo
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+/*
  * GetVesselRoute
  *
  * Returns a vessel's complete daily route by reconstructing movements from vessel database.
@@ -455,6 +614,9 @@ func GetVesselRoute(w http.ResponseWriter, r *http.Request, ps httprouter.Params
 	// Reconstruct vessel route
 	movements := scraper.ReconstructVesselRoute(vesselName, vesselDB)
 
+	// Extract raw sightings
+	rawSightings := extractRawSightings(vesselName, vesselDB)
+
 	// Check if vessel exists
 	if len(movements) == 0 {
 		// Check if vessel name is valid (exists in MMSI map)
@@ -470,10 +632,11 @@ func GetVesselRoute(w http.ResponseWriter, r *http.Request, ps httprouter.Params
 
 	// Build response
 	response := VesselRouteResponse{
-		VesselName: vesselName,
-		MMSI:       staticdata.GetVesselMMSI(vesselName),
-		Date:       time.Now().Format("2006-01-02"), // Current date in ISO 8601
-		Movements:  movements,
+		VesselName:   vesselName,
+		MMSI:         staticdata.GetVesselMMSI(vesselName),
+		Date:         time.Now().Format("2006-01-02"), // Current date in ISO 8601
+		Movements:    movements,
+		RawSightings: rawSightings,
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -630,4 +793,73 @@ func normalizeSlugToVesselName(slug string) string {
 
 	// Join with spaces
 	return strings.Join(words, " ")
+}
+
+/*
+ * extractRawSightings
+ *
+ * Extracts all raw sighting data points for a given vessel from the vessel database.
+ * Returns sightings sorted chronologically.
+ *
+ * @param vesselName string - The vessel name to search for
+ * @param vesselDB map[string]map[string]string - The vessel database (terminal → time → vessel)
+ *
+ * @return []RawSighting - Array of raw sightings sorted by time
+ */
+func extractRawSightings(vesselName string, vesselDB map[string]map[string]string) []RawSighting {
+	var sightings []RawSighting
+	vesselNameLower := strings.ToLower(vesselName)
+	terminals := staticdata.GetTerminals()
+
+	// Iterate through all terminals and times
+	for terminalCode, timeMap := range vesselDB {
+		for departureTime, vessel := range timeMap {
+			if strings.ToLower(vessel) == vesselNameLower {
+				// Get full terminal name
+				terminalName := terminalCode
+				if terminal, ok := terminals[terminalCode]; ok {
+					terminalName = terminal.Name
+				}
+
+				// Convert to 24-hour format
+				time24h := convertTo24HourFormatHelper(departureTime)
+
+				sighting := RawSighting{
+					Terminal:     terminalCode,
+					TerminalName: terminalName,
+					Time:         departureTime,
+					Time24h:      time24h,
+					SourceURL:    fmt.Sprintf("https://www.bcferries.com/current-conditions/departures?terminalCode=%s", terminalCode),
+				}
+				sightings = append(sightings, sighting)
+			}
+		}
+	}
+
+	// Sort by time (24-hour format makes sorting easy)
+	sort.Slice(sightings, func(i, j int) bool {
+		return sightings[i].Time24h < sightings[j].Time24h
+	})
+
+	return sightings
+}
+
+/*
+ * convertTo24HourFormatHelper
+ *
+ * Helper function to convert 12-hour time to 24-hour format for sorting.
+ * Returns HH:MM format.
+ *
+ * @param time12h string - Time in 12-hour format (e.g., "7:00 am")
+ *
+ * @return string - Time in 24-hour format (e.g., "07:00")
+ */
+func convertTo24HourFormatHelper(time12h string) string {
+	layouts := []string{"3:04 pm", "3:04 PM", "03:04 pm", "03:04 PM", "3:04pm", "3:04PM"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, time12h); err == nil {
+			return t.Format("15:04")
+		}
+	}
+	return time12h // Return as-is if parsing fails
 }

@@ -54,6 +54,10 @@ func SetupRouter() *httprouter.Router {
 	router.GET("/healthcheck", HealthCheck)
 	router.GET("/healthcheck/", HealthCheck)
 
+	// Debug endpoints
+	router.GET("/debug/vessel-database", GetVesselDatabaseDebug)
+	router.GET("/debug/vessel-database/", GetVesselDatabaseDebug)
+
 	router.NotFound = http.FileServer(http.Dir("./static"))
 
 	return router

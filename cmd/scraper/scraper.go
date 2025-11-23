@@ -997,36 +997,9 @@ func BuildVesselDatabase(ctx context.Context) map[string]map[string]string {
 		vesselDB[terminalCode] = make(map[string]string)
 		sailingCount := 0
 
-		// Find all route sections - each starts with a header row containing the route
-		// Structure: <tr class="text-center"><td colspan="3"><p class="text-dark-blue"><b>Origin - Destination</b></p></td></tr>
-		// Followed by sailing rows: <tr class="padding-departures-td">...</tr>
-
-		currentDestCode := ""
-		currentDestName := ""
-
 		rowCount := 0
 		document.Find("table tr").Each(func(rowIdx int, row *goquery.Selection) {
 			rowCount++
-			// Check if this is a route header row
-			if row.HasClass("text-center") {
-				log.Printf("BuildVesselDatabase: %s Found text-center row at index %d", terminalCode, rowIdx)
-				headerText := row.Find("p.text-dark-blue b").Text()
-				// Clean up whitespace: replace multiple spaces/newlines with single space
-				headerText = strings.Join(strings.Fields(headerText), " ")
-				log.Printf("BuildVesselDatabase: %s Header text extracted: '%s'", terminalCode, headerText)
-				if headerText != "" && strings.Contains(headerText, " - ") {
-					// Header format: "Mayne Island (Village Bay) - Vancouver (Tsawwassen)"
-					// Split by " - " and take the second part
-					parts := strings.Split(headerText, " - ")
-					if len(parts) == 2 {
-						currentDestName = strings.TrimSpace(parts[1])
-						currentDestCode = staticdata.GetTerminalCodeByName(currentDestName)
-						log.Printf("BuildVesselDatabase: %s route header: '%s' -> destCode='%s'", terminalCode, currentDestName, currentDestCode)
-					}
-				}
-				return // Skip to next row
-			}
-
 			// Check if this is a sailing row
 			if row.HasClass("padding-departures-td") {
 				// Extract vessel name from first column
@@ -1046,26 +1019,10 @@ func BuildVesselDatabase(ctx context.Context) map[string]map[string]string {
 					}
 				})
 
-				// Create composite key: time-destination to handle multiple vessels at same time
-				compositeKey := scheduledTime
-				if currentDestCode != "" {
-					compositeKey = scheduledTime + "-" + currentDestCode
-				}
-
 				// Only store if we found both vessel name and scheduled time
 				if vesselName != "" && scheduledTime != "" {
-					vesselDB[terminalCode][compositeKey] = vesselName
+					vesselDB[terminalCode][scheduledTime] = vesselName
 					sailingCount++
-
-					// Log composite key creation for debugging
-					if currentDestCode != "" && compositeKey != scheduledTime {
-						log.Printf("BuildVesselDatabase: %s -> %s = %s (dest: %s)", terminalCode, compositeKey, vesselName, currentDestName)
-					}
-
-					// Also store with just time for backward compatibility and cases where destination is unknown
-					if _, exists := vesselDB[terminalCode][scheduledTime]; !exists {
-						vesselDB[terminalCode][scheduledTime] = vesselName
-					}
 				}
 			}
 		})
@@ -1358,48 +1315,14 @@ func ReconstructVesselRoute(vesselName string, vesselDB map[string]map[string]st
 	log.Printf("ReconstructVesselRoute: Starting reconstruction for vessel '%s'", vesselName)
 	var rawMovements []rawMovement
 
-	// Iterate through all terminals and all composite keys
+	// Iterate through all terminals and time keys
 	// Note: Use case-insensitive comparison since vessel names may vary in casing
 	vesselNameLower := strings.ToLower(vesselName)
 
-	// Track which terminal+time combinations have composite keys
-	compositeKeysMap := make(map[string]bool)
-
-	// First pass: collect all composite keys
 	for terminalCode, timeMap := range vesselDB {
-		for compositeKey, vessel := range timeMap {
+		for departureTime, vessel := range timeMap {
 			if strings.ToLower(vessel) == vesselNameLower {
-				parts := strings.Split(compositeKey, "-")
-				if len(parts) > 1 {
-					// This is a composite key - mark it
-					compositeKeysMap[terminalCode+"|"+parts[0]] = true
-				}
-			}
-		}
-	}
-
-	// Second pass: collect movements, preferring composite keys but allowing bare keys when no composite exists
-	for terminalCode, timeMap := range vesselDB {
-		for compositeKey, vessel := range timeMap {
-			if strings.ToLower(vessel) == vesselNameLower {
-				log.Printf("ReconstructVesselRoute: Found match at terminal %s, key %s", terminalCode, compositeKey)
-				// Parse composite key: "3:35 pm-POB" or "3:35 pm" (no destination)
-				parts := strings.Split(compositeKey, "-")
-				departureTime := parts[0]
-				destinationCode := ""
-
-				if len(parts) > 1 {
-					// Composite key with destination
-					destinationCode = parts[1]
-				} else {
-					// Bare time key - only include if there's no composite key for this terminal+time
-					uniqueKey := terminalCode + "|" + departureTime
-					if compositeKeysMap[uniqueKey] {
-						log.Printf("ReconstructVesselRoute: Skipping bare time key %s at %s (composite key exists)", compositeKey, terminalCode)
-						continue
-					}
-					log.Printf("ReconstructVesselRoute: Including bare time key %s at %s (no composite key)", compositeKey, terminalCode)
-				}
+				log.Printf("ReconstructVesselRoute: Found match at terminal %s, time %s", terminalCode, departureTime)
 
 				// Parse time for sorting
 				timeOrder, err := parseTime(departureTime)
@@ -1410,7 +1333,7 @@ func ReconstructVesselRoute(vesselName string, vesselDB map[string]map[string]st
 
 				rawMovements = append(rawMovements, rawMovement{
 					OriginCode:      terminalCode,
-					DestinationCode: destinationCode,
+					DestinationCode: "", // No longer using destination from database
 					DepartureTime:   departureTime,
 					TimeOrder:       timeOrder,
 				})
@@ -1428,21 +1351,13 @@ func ReconstructVesselRoute(vesselName string, vesselDB map[string]map[string]st
 	movements := make([]VesselMovement, 0, len(rawMovements))
 
 	for i, raw := range rawMovements {
-		// Find the destination first (next movement's origin)
+		// Find the destination from next movement's origin
 		var destCode string
-		for j := i + 1; j < len(rawMovements); j++ {
-			if rawMovements[j].OriginCode != rawMovements[j].DestinationCode {
-				destCode = rawMovements[j].OriginCode
-				break
-			}
+		if i+1 < len(rawMovements) {
+			destCode = rawMovements[i+1].OriginCode
 		}
 
-		// If no next movement (last sailing), use composite key destination
-		if destCode == "" && raw.DestinationCode != "" {
-			destCode = raw.DestinationCode
-		}
-
-		// Skip movements where origin equals the computed destination
+		// Skip movements where origin equals the computed destination (invalid loop)
 		if destCode != "" && raw.OriginCode == destCode {
 			log.Printf("ReconstructVesselRoute: Skipping invalid movement where origin == destination (%s @ %s)", raw.OriginCode, raw.DepartureTime)
 			continue
@@ -1471,14 +1386,10 @@ func ReconstructVesselRoute(vesselName string, vesselDB map[string]map[string]st
 			log.Printf("ReconstructVesselRoute: NO NEXT STOP (last movement)")
 		}
 
-		// Estimate scheduled arrival time from next VALID movement's departure
-		// Find the next movement where origin != destination
-		for j := i + 1; j < len(rawMovements); j++ {
-			if rawMovements[j].OriginCode != rawMovements[j].DestinationCode {
-				arrivalTime := convertTo24Hour(rawMovements[j].DepartureTime)
-				movement.ScheduledArrivalTime = &arrivalTime
-				break
-			}
+		// Estimate scheduled arrival time from next movement's departure
+		if i+1 < len(rawMovements) {
+			arrivalTime := convertTo24Hour(rawMovements[i+1].DepartureTime)
+			movement.ScheduledArrivalTime = &arrivalTime
 		}
 
 		movements = append(movements, movement)

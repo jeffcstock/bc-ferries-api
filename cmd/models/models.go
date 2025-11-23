@@ -286,13 +286,7 @@ func findVesselByTimeWindow(vesselDB map[string]string, targetTime string, windo
 func findVesselByTimeWindowWithDest(vesselDB map[string]string, targetTime string, destinationCode string, windowMinutes int) *string {
 	unknown := "UNKNOWN"
 
-	// Try composite key first: time-destination (most accurate)
-	compositeKey := targetTime + "-" + destinationCode
-	if vessel, ok := vesselDB[compositeKey]; ok {
-		return &vessel
-	}
-
-	// Fallback to just time (backward compatibility)
+	// Look up vessel by time only (no composite keys)
 	if vessel, ok := vesselDB[targetTime]; ok {
 		return &vessel
 	}
