@@ -63,7 +63,7 @@ var legData = map[string]LegInfo{
 	"PVB-PLH": {DistanceKm: 11.3, AvgDurationMin: 35},
 
 	"POB-PVB": {DistanceKm: 6.9, AvgDurationMin: 25},
-	"PVB-POB": {DistanceKm: 6.9, AvgDurationMin: 30},
+	"PVB-POB": {DistanceKm: 6.9, AvgDurationMin: 25},
 
 	"POB-PSB": {DistanceKm: 14.3, AvgDurationMin: 45},
 	"PSB-POB": {DistanceKm: 14.3, AvgDurationMin: 40},
