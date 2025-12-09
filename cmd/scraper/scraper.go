@@ -122,9 +122,8 @@ func ScrapeCapacityRoutes() {
 				continue
 			}
 
-			defer response.Body.Close()
-
 			document, err := goquery.NewDocumentFromReader(response.Body)
+			response.Body.Close() // Close immediately after reading, not defer in loop
 			if err != nil {
 				log.Printf("ScrapeCapacityRoutes: failed to parse response from %s: %v", link, err)
 				continue
@@ -319,9 +318,8 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
 											return
 										}
 
-										defer response.Body.Close()
-
 										fillDocument, err := goquery.NewDocumentFromReader(response.Body)
+										response.Body.Close() // Close immediately after reading, not defer in loop/callback
 										if err != nil {
 											log.Printf("ScrapeCapacityRoute: failed to parse fill details from %s: %v", link, err)
 											return
@@ -465,7 +463,19 @@ func ScrapeCapacityRoute(document *goquery.Document, fromTerminalCode string, to
 func ScrapeNonCapacityRoutes() {
 	log.Println("ScrapeNonCapacityRoutes: Starting scrape of Southern Gulf Islands routes...")
 
-	ctx, cancel := chromedp.NewContext(context.Background())
+	// Create allocator with memory-friendly options for constrained environments
+	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(context.Background(),
+		append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.Flag("disable-gpu", true),
+			chromedp.Flag("disable-dev-shm-usage", true), // Critical for low-memory environments
+			chromedp.Flag("no-sandbox", true),
+			chromedp.Flag("disable-setuid-sandbox", true),
+			chromedp.Flag("single-process", true), // Reduces memory by running in single process
+		)...,
+	)
+	defer allocatorCancel()
+
+	ctx, cancel := chromedp.NewContext(allocatorCtx)
 	defer cancel()
 
 	// Build vessel database from departures pages
@@ -1136,8 +1146,12 @@ func FindVesselByTimeWindow(vesselDB map[string]string, targetTime string, windo
  * @return error - Any error encountered during navigation or retrieval
  */
 func fetchWithChromedp(ctx context.Context, url string) (string, error) {
+	// Add timeout to prevent hanging on slow pages
+	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
 	var html string
-	err := chromedp.Run(ctx,
+	err := chromedp.Run(timeoutCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.OuterHTML("html", &html),

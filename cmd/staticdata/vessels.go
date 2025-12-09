@@ -1,5 +1,7 @@
 package staticdata
 
+import "strings"
+
 /*
  * Vessel MMSI mapping and vessel name lookup functions
  *
@@ -43,15 +45,18 @@ func init() {
  * GetVesselMMSI
  *
  * Returns the MMSI for a vessel name, or nil if not found.
- * Vessel name matching is case-sensitive.
+ * Vessel name matching is case-insensitive.
  *
  * @param vesselName string - The vessel name (e.g., "Salish Eagle")
  *
  * @return *int - Pointer to MMSI number, or nil if not found
  */
 func GetVesselMMSI(vesselName string) *int {
-	if mmsi, ok := vesselMMSI[vesselName]; ok {
-		return &mmsi
+	vesselNameLower := strings.ToLower(vesselName)
+	for name, mmsi := range vesselMMSI {
+		if strings.ToLower(name) == vesselNameLower {
+			return &mmsi
+		}
 	}
 	return nil
 }

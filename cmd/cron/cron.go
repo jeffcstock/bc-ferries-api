@@ -15,27 +15,23 @@ import (
  * - Scrapes non-capacity route data immediately on startup, then every 1 hour.
  * - Cleans up sailing records older than 48 hours every 6 hours.
  * - Capacity route scraping is disabled (not needed for Southern Gulf Islands focus).
+ * - MaxConcurrentJobs(1) prevents memory exhaustion from overlapping scraper runs.
  *
  * The scheduler runs asynchronously in the background.
- *
- * @return void
  */
 func SetupCron() {
 	s := gocron.NewScheduler(time.UTC)
 
-	// Run non-capacity scraper immediately on startup
-	go scraper.ScrapeNonCapacityRoutes()
+	// Prevent concurrent scraper runs - critical for memory-constrained environments
+	s.SetMaxConcurrentJobs(1, gocron.WaitMode)
 
-	// Run cleanup immediately on startup
-	go scraper.CleanupOldSailings()
-
-	// Schedule non-capacity routes every 1 hour
-	s.Every(1).Hour().Do(func() {
+	// Schedule non-capacity routes every 1 hour, run immediately on startup
+	s.Every(1).Hour().StartImmediately().Do(func() {
 		scraper.ScrapeNonCapacityRoutes()
 	})
 
-	// Schedule database cleanup every 6 hours to remove old sailing data
-	s.Every(6).Hours().Do(func() {
+	// Schedule database cleanup every 6 hours, run immediately on startup
+	s.Every(6).Hours().StartImmediately().Do(func() {
 		scraper.CleanupOldSailings()
 	})
 
